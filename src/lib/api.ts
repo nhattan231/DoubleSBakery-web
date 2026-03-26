@@ -9,7 +9,6 @@ const api = axios.create({
   },
 });
 
-// Request interceptor: thêm JWT token vào header
 api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
     const token = localStorage.getItem('token');
