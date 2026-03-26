@@ -14,6 +14,7 @@ import {
   Popconfirm,
   Typography,
   Steps,
+  Spin,
 } from 'antd';
 import {
   PlusOutlined,
@@ -36,7 +37,17 @@ export default function SuppliersPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Supplier | null>(null);
   const [showGuide, setShowGuide] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const [form] = Form.useForm();
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    setIsMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   const fetchSuppliers = async () => {
     setLoading(true);
@@ -55,6 +66,7 @@ export default function SuppliersPage() {
   }, []);
 
   const handleSubmit = async (values: any) => {
+    setSubmitting(true);
     try {
       if (editing) {
         await suppliersApi.update(editing.id, values);
@@ -69,6 +81,8 @@ export default function SuppliersPage() {
       fetchSuppliers();
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Có lỗi xảy ra');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -199,7 +213,7 @@ export default function SuppliersPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
         <Title level={3} style={{ margin: 0 }}>
           Quản lý nhà cung cấp
         </Title>
@@ -258,14 +272,47 @@ export default function SuppliersPage() {
       )}
 
       <Card>
-        <Table
-          columns={columns}
-          dataSource={suppliers}
-          rowKey="id"
-          loading={loading}
-          pagination={{ pageSize: 20 }}
-          locale={{ emptyText: 'Chưa có nhà cung cấp nào. Bấm "Thêm nhà cung cấp" để bắt đầu.' }}
-        />
+        {isMobile ? (
+          loading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+          ) : suppliers.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>Chưa có nhà cung cấp nào. Bấm &quot;Thêm nhà cung cấp&quot; để bắt đầu.</div>
+          ) : (
+            suppliers.map((supplier) => (
+              <div key={supplier.id} style={{ background: '#fff', border: '1px solid #f0f0f0', borderRadius: 10, padding: '12px 14px', marginBottom: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <strong style={{ color: '#8B6914', fontSize: 14 }}>{supplier.name}</strong>
+                  <Tag color={supplier.isActive ? 'green' : 'red'} style={{ margin: 0, fontSize: 11 }}>{supplier.isActive ? 'Hoạt động' : 'Ngừng'}</Tag>
+                </div>
+                {supplier.phone && <div style={{ fontSize: 13, color: '#666', marginBottom: 2 }}>📞 {supplier.phone}</div>}
+                {supplier.email && <div style={{ fontSize: 13, color: '#666', marginBottom: 2 }}>✉ {supplier.email}</div>}
+                {supplier.address && <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>📍 {supplier.address}</div>}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 6, borderTop: '1px solid #f5f5f5', paddingTop: 6 }}>
+                  <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(supplier)}>Sửa</Button>
+                  {supplier.isActive ? (
+                    <Popconfirm title="Ngừng hoạt động?" onConfirm={() => handleDelete(supplier.id)}>
+                      <Button size="small" danger icon={<DeleteOutlined />}>Ngừng</Button>
+                    </Popconfirm>
+                  ) : (
+                    <Popconfirm title="Kích hoạt lại?" onConfirm={() => handleReactivate(supplier.id)}>
+                      <Button size="small" type="primary" ghost icon={<CheckCircleOutlined />}>Kích hoạt</Button>
+                    </Popconfirm>
+                  )}
+                </div>
+              </div>
+            ))
+          )
+        ) : (
+          <Table
+            columns={columns}
+            dataSource={suppliers}
+            rowKey="id"
+            loading={loading}
+            pagination={{ pageSize: 20 }}
+            scroll={{ x: 700 }}
+            locale={{ emptyText: 'Chưa có nhà cung cấp nào. Bấm "Thêm nhà cung cấp" để bắt đầu.' }}
+          />
+        )}
       </Card>
 
       {/* Modal tạo/sửa NCC */}
@@ -279,6 +326,8 @@ export default function SuppliersPage() {
         }}
         onOk={() => form.submit()}
         okText={editing ? 'Cập nhật' : 'Thêm mới'}
+        okButtonProps={{ loading: submitting }}
+        cancelButtonProps={{ disabled: submitting }}
       >
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
           <Form.Item

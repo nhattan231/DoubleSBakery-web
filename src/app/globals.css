@@ -6,6 +6,33 @@ body {
   background-color: #f5f5f5;
 }
 
+/* ===== Route loading bar ===== */
+.route-loading-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #8B6914, #d4a017, #8B6914);
+  background-size: 200% 100%;
+  z-index: 9999;
+  animation: loading-progress 1.5s ease-in-out infinite, loading-width 0.4s ease-out forwards;
+  border-radius: 0 2px 2px 0;
+}
+@keyframes loading-progress {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+@keyframes loading-width {
+  0% { width: 0; }
+  100% { width: 80%; }
+}
+.route-loading-bar.done {
+  width: 100% !important;
+  animation: none;
+  transition: width 0.2s ease-out, opacity 0.3s ease-out 0.2s;
+  opacity: 0;
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
@@ -22,4 +49,371 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #a1a1a1;
+}
+
+/* ===== RESPONSIVE: Modals ===== */
+@media (max-width: 768px) {
+  .ant-modal {
+    max-width: calc(100vw - 32px) !important;
+    margin: 16px auto !important;
+  }
+  .ant-modal .ant-modal-body {
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+}
+@media (max-width: 480px) {
+  .ant-modal {
+    max-width: calc(100vw - 16px) !important;
+    margin: 8px auto !important;
+    top: 8px !important;
+  }
+  .ant-modal .ant-modal-body {
+    padding: 12px !important;
+  }
+}
+
+/* ===== RESPONSIVE: Tables ===== */
+@media (max-width: 768px) {
+  .ant-table-wrapper {
+    overflow-x: auto;
+  }
+}
+
+/* ===== RESPONSIVE: Popovers ===== */
+@media (max-width: 480px) {
+  .ant-popover {
+    max-width: calc(100vw - 24px) !important;
+    left: 12px !important;
+    right: 12px !important;
+  }
+  .ant-popover .ant-popover-inner-content {
+    padding: 12px !important;
+  }
+}
+
+/* ===== RESPONSIVE: Drawer ===== */
+@media (max-width: 480px) {
+  .ant-drawer-content-wrapper {
+    max-width: 100vw !important;
+    width: 100vw !important;
+  }
+}
+
+/* ===== RESPONSIVE: Page headers ===== */
+@media (max-width: 480px) {
+  .page-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+  }
+}
+
+/* ===== RESPONSIVE: Order item grids (6-col → Full Stack card on mobile) ===== */
+@media (max-width: 768px) {
+  .order-item-header {
+    display: none !important;
+  }
+}
+@media (max-width: 480px) {
+  /* Card container */
+  .order-item-grid {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    grid-template-rows: auto auto auto auto !important;
+    gap: 0 10px !important;
+    background: #fafafa;
+    border: 1px solid #eee;
+    border-radius: 10px;
+    padding: 12px !important;
+    margin-bottom: 10px !important;
+    position: relative;
+  }
+  /* child 1: Sản phẩm → full width */
+  .order-item-grid > :nth-child(1) {
+    grid-column: 1 / -1;
+    margin-bottom: 8px !important;
+  }
+  .order-item-grid > :nth-child(1)::before {
+    content: 'Sản phẩm';
+    display: block;
+    font-size: 11px;
+    color: #999;
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+  /* child 2: Size → cột trái */
+  .order-item-grid > :nth-child(2) {
+    grid-column: 1;
+    margin-bottom: 8px !important;
+  }
+  .order-item-grid > :nth-child(2)::before {
+    content: 'Size';
+    display: block;
+    font-size: 11px;
+    color: #999;
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+  /* child 3: Đơn giá → cột phải */
+  .order-item-grid > :nth-child(3) {
+    grid-column: 2;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: flex-end !important;
+    align-items: flex-end !important;
+    height: auto !important;
+    margin-bottom: 8px !important;
+  }
+  .order-item-grid > :nth-child(3)::before {
+    content: 'Đơn giá';
+    font-size: 11px;
+    color: #999;
+    margin-bottom: 4px;
+    font-weight: 500;
+    align-self: flex-start;
+  }
+  /* child 4: Số lượng → cột trái */
+  .order-item-grid > :nth-child(4) {
+    grid-column: 1;
+    margin-bottom: 0 !important;
+  }
+  .order-item-grid > :nth-child(4)::before {
+    content: 'Số lượng';
+    display: block;
+    font-size: 11px;
+    color: #999;
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+  /* child 5: Thành tiền → cột phải */
+  .order-item-grid > :nth-child(5) {
+    grid-column: 2;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: flex-end !important;
+    align-items: flex-end !important;
+    height: auto !important;
+    font-weight: 700 !important;
+    font-size: 15px !important;
+    color: #8B6914 !important;
+  }
+  .order-item-grid > :nth-child(5)::before {
+    content: 'Thành tiền';
+    font-size: 11px;
+    color: #999;
+    font-weight: 500;
+    margin-bottom: 4px;
+    align-self: flex-start;
+  }
+  /* child 6: Nút xóa → góc trên phải, ngang label "Sản phẩm" */
+  .order-item-grid > :nth-child(6) {
+    position: absolute !important;
+    top: 4px;
+    right: 6px;
+    grid-column: auto;
+  }
+  /* Form items full width */
+  .order-item-grid .ant-form-item {
+    margin-bottom: 0 !important;
+  }
+  .order-item-grid .ant-select {
+    width: 100% !important;
+  }
+  .order-item-grid .ant-input-number {
+    width: 100% !important;
+  }
+}
+
+/* Gift card: override labels + thành tiền color */
+@media (max-width: 480px) {
+  .order-gift-grid > :nth-child(1)::before {
+    content: 'Sản phẩm tặng' !important;
+  }
+  .order-gift-grid > :nth-child(3)::before {
+    content: 'Giá tặng' !important;
+  }
+  .order-gift-grid > :nth-child(3) {
+    align-items: flex-start !important;
+  }
+  .order-gift-grid > :nth-child(5) {
+    color: #eb2f96 !important;
+  }
+  .order-gift-grid > :nth-child(5)::before {
+    content: 'Thành tiền' !important;
+  }
+  .order-gift-grid {
+    border-color: #ffd6e7 !important;
+    background: #fff7fa !important;
+  }
+}
+
+/* ===== RESPONSIVE: Purchase order ingredient row ===== */
+@media (max-width: 480px) {
+  .po-ingredient-row {
+    flex-direction: column !important;
+    padding: 10px !important;
+  }
+  .po-ingredient-row > * {
+    width: 100% !important;
+    min-width: unset !important;
+    flex: 1 1 100% !important;
+  }
+  .po-ingredient-row .ant-select {
+    width: 100% !important;
+  }
+  .po-ingredient-row .ant-input-number {
+    width: 100% !important;
+  }
+}
+
+/* ===== RESPONSIVE: Estimate item grids (Full Stack Card) ===== */
+@media (max-width: 480px) {
+  .estimate-item-grid {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 0 10px !important;
+    background: #fafafa;
+    border: 1px solid #eee;
+    border-radius: 10px;
+    padding: 12px !important;
+    margin-bottom: 10px !important;
+    position: relative;
+  }
+  /* child 1: Sản phẩm → full width */
+  .estimate-item-grid > :nth-child(1) {
+    grid-column: 1 / -1;
+    margin-bottom: 8px !important;
+  }
+  .estimate-item-grid > :nth-child(1)::before {
+    content: 'Sản phẩm';
+    display: block;
+    font-size: 11px;
+    color: #999;
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+  /* child 2: Size → cột trái */
+  .estimate-item-grid > :nth-child(2) {
+    grid-column: 1;
+    margin-bottom: 0 !important;
+  }
+  .estimate-item-grid > :nth-child(2)::before {
+    content: 'Size';
+    display: block;
+    font-size: 11px;
+    color: #999;
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+  /* child 3: Số lượng → cột phải */
+  .estimate-item-grid > :nth-child(3) {
+    grid-column: 2;
+    margin-bottom: 0 !important;
+  }
+  .estimate-item-grid > :nth-child(3)::before {
+    content: 'Số lượng';
+    display: block;
+    font-size: 11px;
+    color: #999;
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+  /* child 4: Nút xóa → góc trên phải */
+  .estimate-item-grid > :nth-child(4) {
+    position: absolute !important;
+    top: 6px;
+    right: 8px;
+  }
+  .estimate-item-grid .ant-select,
+  .estimate-item-grid .ant-input-number {
+    width: 100% !important;
+  }
+  .estimate-item-grid .ant-form-item {
+    margin-bottom: 0 !important;
+  }
+  .estimate-item-header {
+    display: none !important;
+  }
+}
+
+/* ===== RESPONSIVE: Product size cards ===== */
+@media (max-width: 480px) {
+  .size-card {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px !important;
+    background: #fafafa;
+    border: 1px solid #eee;
+    border-radius: 10px;
+    padding: 12px !important;
+    margin-bottom: 10px !important;
+    position: relative;
+  }
+  /* child 1: Tên size → full width */
+  .size-card > :nth-child(1) {
+    grid-column: 1 / -1;
+  }
+  .size-card > :nth-child(1)::before {
+    content: 'Tên size';
+    display: block;
+    font-size: 11px;
+    color: #999;
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+  /* child 2: Giá → cột trái */
+  .size-card > :nth-child(2)::before {
+    content: 'Giá (VNĐ)';
+    display: block;
+    font-size: 11px;
+    color: #999;
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+  /* child 3: Thứ tự → cột phải */
+  .size-card > :nth-child(3)::before {
+    content: 'Thứ tự';
+    display: block;
+    font-size: 11px;
+    color: #999;
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+  /* child 4: Nút xóa → góc trên phải */
+  .size-card > :nth-child(4) {
+    position: absolute !important;
+    top: 6px;
+    right: 8px;
+  }
+  .size-card .ant-input,
+  .size-card .ant-input-number {
+    width: 100% !important;
+  }
+  .size-card .ant-form-item {
+    margin-bottom: 0 !important;
+  }
+}
+
+/* ===== RESPONSIVE: General form elements ===== */
+@media (max-width: 480px) {
+  .ant-modal .ant-form-item {
+    margin-bottom: 12px !important;
+  }
+  .ant-modal .ant-divider {
+    margin: 12px 0 !important;
+  }
+  .ant-modal .ant-space {
+    flex-wrap: wrap;
+  }
+  .ant-modal .ant-alert {
+    padding: 8px 12px !important;
+    font-size: 12px !important;
+  }
+  .ant-modal .ant-alert .ant-alert-description {
+    font-size: 12px !important;
+  }
+  .ant-modal .ant-alert .ant-alert-description ul {
+    padding-left: 14px !important;
+  }
 }

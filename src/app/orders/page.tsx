@@ -20,6 +20,7 @@ import {
   Alert,
   DatePicker,
   Radio,
+  Spin,
 } from 'antd';
 import {
   PlusOutlined,
@@ -84,7 +85,17 @@ export default function OrdersPage() {
   const [searchText, setSearchText] = useState('');
   const [form] = Form.useForm();
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
+  const [submitting, setSubmitting] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    setIsMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   const fetchOrders = useCallback(async (page = 1) => {
     setLoading(true);
@@ -149,6 +160,7 @@ export default function OrdersPage() {
   };
 
   const handleCreate = async (values: any) => {
+    setSubmitting(true);
     try {
       // Gộp sản phẩm thường + quà tặng vào cùng 1 mảng items
       const normalItems = (values.items || []).map((item: any) => ({
@@ -180,6 +192,8 @@ export default function OrdersPage() {
       fetchOrders(pagination.current);
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Có lỗi xảy ra');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -319,7 +333,7 @@ export default function OrdersPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
         <Title level={3} style={{ margin: 0 }}>
           Quản lý đơn hàng
         </Title>
@@ -367,14 +381,14 @@ export default function OrdersPage() {
             onChange={(dates) => handleRangeChange(dates as [dayjs.Dayjs, dayjs.Dayjs] | null)}
             format="DD/MM/YYYY"
             placeholder={['Từ ngày', 'Đến ngày']}
-            style={{ width: 240 }}
+            style={{ width: 240, minWidth: 200, flex: '1 1 200px' }}
             allowClear
           />
 
           <Select
             placeholder="Trạng thái"
             allowClear
-            style={{ width: 140 }}
+            style={{ width: 140, minWidth: 120, flex: '0 1 140px' }}
             value={statusFilter}
             onChange={(val) => setStatusFilter(val)}
             options={Object.entries(orderStatusMap).map(([k, v]) => ({
@@ -388,7 +402,7 @@ export default function OrdersPage() {
             allowClear
             onSearch={(value) => setSearchText(value)}
             onChange={(e) => handleSearchDebounce(e.target.value)}
-            style={{ width: 220 }}
+            style={{ width: 220, minWidth: 160, flex: '1 1 160px' }}
           />
 
           <Button icon={<ReloadOutlined />} onClick={() => fetchOrders()}>
@@ -396,18 +410,94 @@ export default function OrdersPage() {
           </Button>
         </div>
 
-        <Table
-          columns={columns}
-          dataSource={orders}
-          rowKey="id"
-          loading={loading}
-          pagination={{
-            current: pagination.current,
-            pageSize: pagination.pageSize,
-            total: pagination.total,
-            onChange: (page) => fetchOrders(page),
-          }}
-        />
+        {isMobile ? (
+          /* Mobile: Card List */
+          <Spin spinning={loading}>
+            {orders.length === 0 && !loading ? (
+              <div style={{ textAlign: 'center', padding: 32, color: '#999' }}>Không có đơn hàng</div>
+            ) : (
+              <>
+                {orders.map((order) => {
+                  const s = orderStatusMap[order.status] || { label: order.status, color: 'default' };
+                  return (
+                    <div
+                      key={order.id}
+                      style={{
+                        background: '#fff',
+                        border: '1px solid #f0f0f0',
+                        borderRadius: 10,
+                        padding: '12px 14px',
+                        marginBottom: 10,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                      }}
+                    >
+                      {/* Row 1: Mã đơn + Trạng thái */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <strong style={{ fontSize: 13, color: '#333' }}>{order.orderNumber}</strong>
+                        <Tag color={s.color} style={{ margin: 0, fontSize: 11 }}>{s.label}</Tag>
+                      </div>
+                      {/* Row 2: Khách hàng + SĐT */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#666', marginBottom: 6 }}>
+                        <span>{order.customerName}</span>
+                        <span>{order.phone || ''}</span>
+                      </div>
+                      {/* Row 3: Ngày + Tổng tiền */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                        <span style={{ fontSize: 12, color: '#999' }}>{formatDateTime(order.createdAt)}</span>
+                        <strong style={{ fontSize: 15, color: '#8B6914' }}>{formatCurrency(order.totalAmount)}</strong>
+                      </div>
+                      {/* Row 4: Buttons */}
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        <Button size="small" icon={<EyeOutlined />} onClick={() => viewDetail(order)}>Chi tiết</Button>
+                        {order.status === 'pending' && (
+                          <>
+                            <Popconfirm title="Xác nhận đơn hàng?" onConfirm={() => handleStatusChange(order.id, 'confirmed')}>
+                              <Button size="small" type="primary" icon={<CheckCircleOutlined />}>Xác nhận</Button>
+                            </Popconfirm>
+                            <Popconfirm title="Huỷ đơn hàng?" onConfirm={() => handleStatusChange(order.id, 'cancelled')}>
+                              <Button size="small" danger icon={<CloseCircleOutlined />}>Huỷ</Button>
+                            </Popconfirm>
+                          </>
+                        )}
+                        {order.status === 'confirmed' && (
+                          <Button size="small" onClick={() => handleStatusChange(order.id, 'processing')}>Xử lý</Button>
+                        )}
+                        {order.status === 'processing' && (
+                          <Button size="small" type="primary" style={{ backgroundColor: '#52c41a' }} onClick={() => handleStatusChange(order.id, 'completed')}>Hoàn thành</Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {/* Pagination */}
+                {pagination.total > pagination.pageSize && (
+                  <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                    <Space>
+                      <Button size="small" disabled={pagination.current <= 1} onClick={() => fetchOrders(pagination.current - 1)}>Trước</Button>
+                      <span style={{ fontSize: 13, color: '#666' }}>Trang {pagination.current} / {Math.ceil(pagination.total / pagination.pageSize)}</span>
+                      <Button size="small" disabled={pagination.current >= Math.ceil(pagination.total / pagination.pageSize)} onClick={() => fetchOrders(pagination.current + 1)}>Sau</Button>
+                    </Space>
+                  </div>
+                )}
+              </>
+            )}
+          </Spin>
+        ) : (
+          /* Desktop: Table */
+          <Table
+            columns={columns}
+            dataSource={orders}
+            rowKey="id"
+            loading={loading}
+            scroll={{ x: 800 }}
+            pagination={{
+              current: pagination.current,
+              pageSize: pagination.pageSize,
+              total: pagination.total,
+              onChange: (page) => fetchOrders(page),
+            }}
+          />
+        )}
       </Card>
 
       {/* Modal tạo đơn hàng */}
@@ -420,7 +510,8 @@ export default function OrdersPage() {
         }}
         okText="Tạo đơn hàng"
         cancelText="Huỷ"
-        okButtonProps={{ icon: <ShoppingCartOutlined /> }}
+        okButtonProps={{ icon: <ShoppingCartOutlined />, loading: submitting }}
+        cancelButtonProps={{ disabled: submitting }}
         onOk={() => form.submit()}
         width={860}
       >
@@ -449,7 +540,7 @@ export default function OrdersPage() {
             <Input placeholder="Nguyễn Văn A" />
           </Form.Item>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0 16px' }}>
             <Form.Item
               name="phone"
               label="Số điện thoại"
@@ -477,7 +568,7 @@ export default function OrdersPage() {
               <>
                 {/* Header bảng */}
                 {fields.length > 0 && (
-                  <div style={{
+                  <div className="order-item-header" style={{
                     display: 'grid',
                     gridTemplateColumns: '2fr 120px 100px 80px 110px 40px',
                     gap: 8,
@@ -524,6 +615,7 @@ export default function OrdersPage() {
                   return (
                     <div
                       key={key}
+                      className="order-item-grid"
                       style={{
                         display: 'grid',
                         gridTemplateColumns: '2fr 120px 100px 80px 110px 40px',
@@ -638,26 +730,21 @@ export default function OrdersPage() {
 
                   return (
                     <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: '2fr 120px 100px 80px 110px 40px',
-                      gap: 8,
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
                       padding: '10px 0 4px',
                       borderTop: '2px solid #f0f0f0',
                       marginTop: 8,
                     }}>
                       <span style={{ fontWeight: 600, color: '#333' }}>Tổng cộng</span>
-                      <span />
-                      <span />
-                      <span />
                       <span style={{
-                        textAlign: 'right',
                         fontWeight: 700,
                         fontSize: 15,
                         color: '#8B6914',
                       }}>
                         {formatCurrency(grandTotal)}
                       </span>
-                      <span />
                     </div>
                   );
                 })()}
@@ -689,7 +776,7 @@ export default function OrdersPage() {
             {(fields, { add, remove }) => (
               <>
                 {fields.length > 0 && (
-                  <div style={{
+                  <div className="order-item-header" style={{
                     display: 'grid',
                     gridTemplateColumns: '2fr 120px 100px 80px 110px 40px',
                     gap: 8,
@@ -718,14 +805,8 @@ export default function OrdersPage() {
                   const quantity = currentItem.quantity || 0;
                   const subtotal = customPrice * quantity;
 
-                  // Tính các sizeId đã chọn cho cùng productId ở các dòng khác (cả items thường + gift khác)
-                  const allNormalItems = form.getFieldValue('items') || [];
+                  // Tính các sizeId đã chọn cho cùng productId ở các dòng gift khác (không check chéo items thường)
                   const takenSizeKeys = new Set<string>();
-                  allNormalItems.forEach((item: any) => {
-                    if (item?.productId === selectedProductId) {
-                      takenSizeKeys.add(item?.sizeId || 'default');
-                    }
-                  });
                   giftItems.forEach((item: any, idx: number) => {
                     if (idx !== name && item?.productId === selectedProductId) {
                       takenSizeKeys.add(item?.sizeId || 'default');
@@ -742,6 +823,7 @@ export default function OrdersPage() {
                   return (
                     <div
                       key={key}
+                      className="order-item-grid order-gift-grid"
                       style={{
                         display: 'grid',
                         gridTemplateColumns: '2fr 120px 100px 80px 110px 40px',
@@ -935,7 +1017,7 @@ export default function OrdersPage() {
       >
         {selectedOrder && (
           <>
-            <Descriptions bordered size="small" column={2}>
+            <Descriptions bordered size="small" column={{ xs: 1, sm: 2 }}>
               <Descriptions.Item label="Mã đơn">{selectedOrder.orderNumber}</Descriptions.Item>
               <Descriptions.Item label="Trạng thái">
                 <Tag color={orderStatusMap[selectedOrder.status]?.color}>
@@ -958,47 +1040,78 @@ export default function OrdersPage() {
 
             <Divider>Sản phẩm trong đơn</Divider>
 
-            <Table
-              dataSource={selectedOrder.items}
-              rowKey="id"
-              pagination={false}
-              size="small"
-              columns={[
-                {
-                  title: 'Sản phẩm',
-                  dataIndex: ['product', 'name'],
-                  render: (name: string, record: any) => (
-                    <Space>
-                      <span>{name}</span>
-                      {record.size && (
-                        <Tag color="blue" style={{ margin: '0 0 0 4px' }}>{record.size.name}</Tag>
-                      )}
-                      {record.isGift && <Tag color="pink" style={{ margin: 0 }}><GiftOutlined /> Tặng</Tag>}
-                    </Space>
-                  ),
-                },
-                {
-                  title: 'Đơn giá',
-                  dataIndex: 'unitPrice',
-                  render: (v: number, record: any) => (
-                    <span style={{ color: record.isGift ? '#eb2f96' : undefined }}>
-                      {formatCurrency(v)}
-                      {record.isGift && Number(v) === 0 && ' (Free)'}
-                    </span>
-                  ),
-                },
-                { title: 'SL', dataIndex: 'quantity' },
-                {
-                  title: 'Thành tiền',
-                  dataIndex: 'subtotal',
-                  render: (v: number, record: any) => (
-                    <span style={{ color: record.isGift ? '#eb2f96' : undefined }}>
-                      {formatCurrency(v)}
-                    </span>
-                  ),
-                },
-              ]}
-            />
+            {isMobile ? (
+              /* Mobile: Product card list */
+              <>
+                {selectedOrder.items.map((item: any) => (
+                  <div key={item.id} style={{
+                    background: item.isGift ? '#fff7fa' : '#fafafa',
+                    border: `1px solid ${item.isGift ? '#ffd6e7' : '#f0f0f0'}`,
+                    borderRadius: 8,
+                    padding: '10px 12px',
+                    marginBottom: 8,
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <strong style={{ fontSize: 13 }}>{item.product?.name}</strong>
+                        {item.size && <Tag color="blue" style={{ margin: 0, fontSize: 11 }}>{item.size.name}</Tag>}
+                        {item.isGift && <Tag color="pink" style={{ margin: 0, fontSize: 11 }}><GiftOutlined /> Tặng</Tag>}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13 }}>
+                      <span style={{ color: item.isGift ? '#eb2f96' : '#666' }}>
+                        {formatCurrency(item.unitPrice)}{item.isGift && Number(item.unitPrice) === 0 ? ' (Free)' : ''} × {item.quantity}
+                      </span>
+                      <strong style={{ color: item.isGift ? '#eb2f96' : '#8B6914', fontSize: 14 }}>
+                        {formatCurrency(item.subtotal)}
+                      </strong>
+                    </div>
+                  </div>
+                ))}
+              </>
+            ) : (
+              <Table
+                dataSource={selectedOrder.items}
+                rowKey="id"
+                pagination={false}
+                size="small"
+                columns={[
+                  {
+                    title: 'Sản phẩm',
+                    dataIndex: ['product', 'name'],
+                    render: (name: string, record: any) => (
+                      <Space>
+                        <span>{name}</span>
+                        {record.size && (
+                          <Tag color="blue" style={{ margin: '0 0 0 4px' }}>{record.size.name}</Tag>
+                        )}
+                        {record.isGift && <Tag color="pink" style={{ margin: 0 }}><GiftOutlined /> Tặng</Tag>}
+                      </Space>
+                    ),
+                  },
+                  {
+                    title: 'Đơn giá',
+                    dataIndex: 'unitPrice',
+                    render: (v: number, record: any) => (
+                      <span style={{ color: record.isGift ? '#eb2f96' : undefined }}>
+                        {formatCurrency(v)}
+                        {record.isGift && Number(v) === 0 && ' (Free)'}
+                      </span>
+                    ),
+                  },
+                  { title: 'SL', dataIndex: 'quantity' },
+                  {
+                    title: 'Thành tiền',
+                    dataIndex: 'subtotal',
+                    render: (v: number, record: any) => (
+                      <span style={{ color: record.isGift ? '#eb2f96' : undefined }}>
+                        {formatCurrency(v)}
+                      </span>
+                    ),
+                  },
+                ]}
+              />
+            )}
 
             {/* ========== Chi tiết định lượng ========== */}
             {orderEstimate && (
@@ -1014,6 +1127,7 @@ export default function OrdersPage() {
                   style={{
                     display: 'flex',
                     gap: 24,
+                    flexWrap: 'wrap',
                     marginBottom: 12,
                     padding: '10px 16px',
                     background: '#fafafa',
@@ -1042,71 +1156,103 @@ export default function OrdersPage() {
                   </div>
                 </div>
 
-                <Table
-                  dataSource={orderEstimate.ingredients}
-                  rowKey="ingredientId"
-                  pagination={false}
-                  size="small"
-                  columns={[
-                    {
-                      title: 'Nguyên liệu',
-                      dataIndex: 'ingredientName',
-                      render: (name: string, record: any) => (
-                        <span>
-                          {name}
-                          {record.shortage > 0 && (
-                            <WarningOutlined style={{ marginLeft: 4, color: '#ff4d4f' }} />
+                {isMobile ? (
+                  /* Mobile: Ingredient card list */
+                  <>
+                    {orderEstimate.ingredients.map((ing: any) => (
+                      <div key={ing.ingredientId} style={{
+                        background: ing.shortage > 0 ? '#fff2f0' : '#fafafa',
+                        border: `1px solid ${ing.shortage > 0 ? '#ffccc7' : '#f0f0f0'}`,
+                        borderRadius: 8,
+                        padding: '10px 12px',
+                        marginBottom: 6,
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <strong style={{ fontSize: 13 }}>{ing.ingredientName}</strong>
+                            <Tag style={{ margin: 0, fontSize: 10 }}>{ing.unit}</Tag>
+                          </div>
+                          {ing.shortage > 0 ? (
+                            <Tag color="red" style={{ margin: 0, fontSize: 11 }}>-{Number(ing.shortage).toLocaleString()}</Tag>
+                          ) : (
+                            <Tag color="green" style={{ margin: 0, fontSize: 11 }}>Đủ</Tag>
                           )}
-                        </span>
-                      ),
-                    },
-                    {
-                      title: 'Đơn vị',
-                      dataIndex: 'unit',
-                      width: 70,
-                      render: (u: string) => <Tag>{u}</Tag>,
-                    },
-                    {
-                      title: 'Cần dùng',
-                      dataIndex: 'totalNeeded',
-                      width: 90,
-                      render: (v: number) => <strong>{Number(v).toLocaleString()}</strong>,
-                    },
-                    {
-                      title: 'Tồn kho',
-                      dataIndex: 'currentStock',
-                      width: 90,
-                      render: (v: number, record: any) => (
-                        <span style={{ color: record.shortage > 0 ? '#ff4d4f' : '#52c41a' }}>
-                          {Number(v).toLocaleString()}
-                        </span>
-                      ),
-                    },
-                    {
-                      title: 'Thiếu',
-                      dataIndex: 'shortage',
-                      width: 80,
-                      render: (v: number) =>
-                        v > 0 ? (
-                          <Tag color="red">-{Number(v).toLocaleString()}</Tag>
-                        ) : (
-                          <Tag color="green">Đủ</Tag>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#666' }}>
+                          <span>Cần: <strong>{Number(ing.totalNeeded).toLocaleString()}</strong></span>
+                          <span>Kho: <span style={{ color: ing.shortage > 0 ? '#ff4d4f' : '#52c41a', fontWeight: 600 }}>{Number(ing.currentStock).toLocaleString()}</span></span>
+                          <strong style={{ color: '#8B6914' }}>{formatCurrency(ing.estimatedCost)}</strong>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                ) : (
+                  <Table
+                    dataSource={orderEstimate.ingredients}
+                    rowKey="ingredientId"
+                    pagination={false}
+                    size="small"
+                    columns={[
+                      {
+                        title: 'Nguyên liệu',
+                        dataIndex: 'ingredientName',
+                        render: (name: string, record: any) => (
+                          <span>
+                            {name}
+                            {record.shortage > 0 && (
+                              <WarningOutlined style={{ marginLeft: 4, color: '#ff4d4f' }} />
+                            )}
+                          </span>
                         ),
-                    },
-                    {
-                      title: 'Đơn giá',
-                      dataIndex: 'costPerUnit',
-                      width: 100,
-                      render: (v: number) => v ? formatCurrency(v) : '—',
-                    },
-                    {
-                      title: 'Chi phí',
-                      dataIndex: 'estimatedCost',
-                      width: 110,
-                      render: (v: number) => formatCurrency(v),
-                    },
-                  ]}
-                />
+                      },
+                      {
+                        title: 'Đơn vị',
+                        dataIndex: 'unit',
+                        width: 70,
+                        render: (u: string) => <Tag>{u}</Tag>,
+                      },
+                      {
+                        title: 'Cần dùng',
+                        dataIndex: 'totalNeeded',
+                        width: 90,
+                        render: (v: number) => <strong>{Number(v).toLocaleString()}</strong>,
+                      },
+                      {
+                        title: 'Tồn kho',
+                        dataIndex: 'currentStock',
+                        width: 90,
+                        render: (v: number, record: any) => (
+                          <span style={{ color: record.shortage > 0 ? '#ff4d4f' : '#52c41a' }}>
+                            {Number(v).toLocaleString()}
+                          </span>
+                        ),
+                      },
+                      {
+                        title: 'Thiếu',
+                        dataIndex: 'shortage',
+                        width: 80,
+                        render: (v: number) =>
+                          v > 0 ? (
+                            <Tag color="red">-{Number(v).toLocaleString()}</Tag>
+                          ) : (
+                            <Tag color="green">Đủ</Tag>
+                          ),
+                      },
+                      {
+                        title: 'Đơn giá',
+                        dataIndex: 'costPerUnit',
+                        width: 100,
+                        render: (v: number) => v ? formatCurrency(v) : '—',
+                      },
+                      {
+                        title: 'Chi phí',
+                        dataIndex: 'estimatedCost',
+                        width: 110,
+                        render: (v: number) => formatCurrency(v),
+                      },
+                    ]}
+                  />
+                )}
               </>
             )}
 

@@ -2,7 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Layout, Menu, Button, Avatar, Dropdown, Badge, Spin, Popover, Tag, Empty, Progress } from 'antd';
+import { Layout, Menu, Button, Avatar, Dropdown, Badge, Spin, Popover, Tag, Empty, Progress, Drawer } from 'antd';
+import RouteLoadingBar from '@/components/RouteLoadingBar';
 import {
   DashboardOutlined,
   ShoppingCartOutlined,
@@ -20,6 +21,7 @@ import {
   QuestionCircleOutlined,
   HistoryOutlined,
   WarningOutlined,
+  MenuOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '@/store/auth';
 import { ingredientsApi } from '@/lib/api';
@@ -80,8 +82,28 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { user, logout, loadFromStorage, isAuthenticated } = useAuthStore();
   const [collapsed, setCollapsed] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [lowStockItems, setLowStockItems] = useState<Ingredient[]>([]);
   const [initialized, setInitialized] = useState(false);
+
+  // Detect mobile
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    setIsMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
+  // Prefetch tất cả routes khi đã login → load nhanh khi bấm menu
+  useEffect(() => {
+    if (isAuthenticated) {
+      menuItems.forEach((item) => {
+        router.prefetch(item.key);
+      });
+    }
+  }, [isAuthenticated, router]);
 
   // Bước 1: Load auth từ localStorage trước
   useEffect(() => {
@@ -179,7 +201,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   );
 
   const notificationContent = (
-    <div style={{ width: 340 }}>
+    <div style={{ width: isMobile ? 'calc(100vw - 80px)' : 340, maxWidth: 340 }}>
       <div
         style={{
           fontWeight: 600,
@@ -278,62 +300,113 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     },
   ];
 
+  const handleMenuClick = (key: string) => {
+    router.push(key);
+    if (isMobile) setDrawerOpen(false);
+  };
+
+  const sidebarMenu = (
+    <>
+      <div
+        style={{
+          height: 64,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderBottom: '1px solid #f0f0f0',
+          padding: '8px',
+          cursor: 'pointer',
+        }}
+        onClick={() => handleMenuClick('/dashboard')}
+      >
+        <img
+          src="/images/logo.jpg"
+          alt="Double S Bakery"
+          style={{ height: 48, width: 48, borderRadius: '50%', objectFit: 'cover' }}
+        />
+        <span style={{ marginLeft: 10, fontSize: 14, fontWeight: 'bold', color: '#8B6914', whiteSpace: 'nowrap' }}>
+          Double S Bakery
+        </span>
+      </div>
+      <Menu
+        mode="inline"
+        selectedKeys={[pathname]}
+        items={menuItems}
+        onClick={({ key }) => handleMenuClick(key)}
+        style={{ borderRight: 0, marginTop: 8 }}
+      />
+    </>
+  );
+
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Sider
-        trigger={null}
-        collapsible
-        collapsed={collapsed}
-        theme="light"
-        style={{
-          boxShadow: '2px 0 8px rgba(0,0,0,0.06)',
-          zIndex: 10,
-        }}
-      >
-        <div
-          style={{
-            height: 64,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderBottom: '1px solid #f0f0f0',
-            padding: '8px',
-            cursor: 'pointer',
-          }}
-          onClick={() => router.push('/dashboard')}
+      <RouteLoadingBar />
+      {/* Desktop: Sider | Mobile: Drawer */}
+      {isMobile ? (
+        <Drawer
+          placement="left"
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          width={250}
+          styles={{ body: { padding: 0 } }}
         >
-          <img
-            src="/images/logo.jpg"
-            alt="Double S Bakery"
+          {sidebarMenu}
+        </Drawer>
+      ) : (
+        <Sider
+          trigger={null}
+          collapsible
+          collapsed={collapsed}
+          theme="light"
+          style={{
+            boxShadow: '2px 0 8px rgba(0,0,0,0.06)',
+            zIndex: 10,
+          }}
+        >
+          <div
             style={{
-              height: collapsed ? 40 : 48,
-              width: collapsed ? 40 : 48,
-              borderRadius: '50%',
-              objectFit: 'cover',
-              transition: 'all 0.2s',
+              height: 64,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderBottom: '1px solid #f0f0f0',
+              padding: '8px',
+              cursor: 'pointer',
             }}
+            onClick={() => router.push('/dashboard')}
+          >
+            <img
+              src="/images/logo.jpg"
+              alt="Double S Bakery"
+              style={{
+                height: collapsed ? 40 : 48,
+                width: collapsed ? 40 : 48,
+                borderRadius: '50%',
+                objectFit: 'cover',
+                transition: 'all 0.2s',
+              }}
+            />
+            {!collapsed && (
+              <span style={{ marginLeft: 10, fontSize: 14, fontWeight: 'bold', color: '#8B6914', whiteSpace: 'nowrap' }}>
+                Double S Bakery
+              </span>
+            )}
+          </div>
+          <Menu
+            mode="inline"
+            selectedKeys={[pathname]}
+            items={menuItems}
+            onClick={({ key }) => router.push(key)}
+            style={{ borderRight: 0, marginTop: 8 }}
           />
-          {!collapsed && (
-            <span style={{ marginLeft: 10, fontSize: 14, fontWeight: 'bold', color: '#8B6914', whiteSpace: 'nowrap' }}>
-              Double S Bakery
-            </span>
-          )}
-        </div>
-
-        <Menu
-          mode="inline"
-          selectedKeys={[pathname]}
-          items={menuItems}
-          onClick={({ key }) => router.push(key)}
-          style={{ borderRight: 0, marginTop: 8 }}
-        />
-      </Sider>
+        </Sider>
+      )}
 
       <Layout>
         <Header
           style={{
             background: '#fff',
-            padding: '0 24px',
+            padding: isMobile ? '0 12px' : '0 24px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -341,54 +414,38 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             zIndex: 9,
           }}
         >
-          <Button
-            type="text"
-            icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-            onClick={() => setCollapsed(!collapsed)}
-          />
+          {isMobile ? (
+            <Button type="text" icon={<MenuOutlined />} onClick={() => setDrawerOpen(true)} />
+          ) : (
+            <Button
+              type="text"
+              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+              onClick={() => setCollapsed(!collapsed)}
+            />
+          )}
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <Popover
-              content={workflowContent}
-              trigger="click"
-              placement="bottomRight"
-            >
-              <Button
-                type="text"
-                icon={<QuestionCircleOutlined />}
-                style={{ color: '#8B6914' }}
-              >
-                Quy trình
-              </Button>
-            </Popover>
+          <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 16 }}>
+            {!isMobile && (
+              <Popover content={workflowContent} trigger="click" placement="bottomRight">
+                <Button type="text" icon={<QuestionCircleOutlined />} style={{ color: '#8B6914' }}>
+                  Quy trình
+                </Button>
+              </Popover>
+            )}
 
-            <Popover
-              content={notificationContent}
-              trigger="click"
-              placement="bottomRight"
-            >
+            <Popover content={notificationContent} trigger="click" placement="bottomRight">
               <Badge count={lowStockItems.length} size="small">
-                <BellOutlined
-                  style={{ fontSize: 18, cursor: 'pointer' }}
-                />
+                <BellOutlined style={{ fontSize: 18, cursor: 'pointer' }} />
               </Badge>
             </Popover>
 
             <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
-              <Avatar
-                icon={<UserOutlined />}
-                style={{ cursor: 'pointer', backgroundColor: '#8B6914' }}
-              />
+              <Avatar icon={<UserOutlined />} style={{ cursor: 'pointer', backgroundColor: '#8B6914' }} />
             </Dropdown>
           </div>
         </Header>
 
-        <Content
-          style={{
-            margin: 24,
-            minHeight: 280,
-          }}
-        >
+        <Content style={{ margin: isMobile ? 12 : 24, minHeight: 280 }}>
           {children}
         </Content>
       </Layout>

@@ -53,6 +53,16 @@ export default function EstimatePage() {
     recipes: Recipe[];
   } | null>(null);
 
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    setIsMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
   useEffect(() => {
     productsApi
       .getAll({ limit: 100, status: 'active' })
@@ -116,14 +126,6 @@ export default function EstimatePage() {
 
   const recipeColumns = [
     {
-      title: '#',
-      key: 'index',
-      width: 40,
-      render: (_: any, __: any, index: number) => (
-        <Text type="secondary">{index + 1}</Text>
-      ),
-    },
-    {
       title: 'Nguyên liệu',
       dataIndex: ['ingredient', 'name'],
       key: 'name',
@@ -133,6 +135,7 @@ export default function EstimatePage() {
       title: 'Định lượng',
       dataIndex: 'quantity',
       key: 'quantity',
+      width: 110,
       align: 'right' as const,
       render: (val: number, record: any) => (
         <span>
@@ -146,6 +149,7 @@ export default function EstimatePage() {
     {
       title: 'Đơn giá',
       key: 'costPerUnit',
+      width: 90,
       align: 'right' as const,
       render: (_: any, record: any) => (
         <Text type="secondary">
@@ -156,11 +160,15 @@ export default function EstimatePage() {
     {
       title: 'Thành tiền',
       key: 'costPerProduct',
+      width: 100,
       align: 'right' as const,
-      render: (_: any, record: any) =>
-        formatCurrency(
-          Number(record.quantity) * Number(record.ingredient?.costPerUnit ?? 0),
-        ),
+      render: (_: any, record: any) => (
+        <strong>
+          {formatCurrency(
+            Number(record.quantity) * Number(record.ingredient?.costPerUnit ?? 0),
+          )}
+        </strong>
+      ),
     },
   ];
 
@@ -252,7 +260,7 @@ export default function EstimatePage() {
                   <>
                     {/* Header bảng */}
                     {fields.length > 0 && (
-                      <div style={{
+                      <div className="estimate-item-header" style={{
                         display: 'grid',
                         gridTemplateColumns: '2fr 110px 70px 68px',
                         gap: 8,
@@ -294,6 +302,7 @@ export default function EstimatePage() {
                       return (
                         <div
                           key={key}
+                          className="estimate-item-grid"
                           style={{
                             display: 'grid',
                             gridTemplateColumns: '2fr 110px 70px 68px',
@@ -419,21 +428,21 @@ export default function EstimatePage() {
             <Card title="Kết quả ước tính">
               {/* Tong quan */}
               <Row gutter={16} style={{ marginBottom: 24 }}>
-                <Col span={8}>
+                <Col xs={24} sm={8}>
                   <Statistic
                     title="Tổng chi phí NL"
                     value={result.totalEstimatedCost}
                     formatter={(val) => formatCurrency(Number(val))}
                   />
                 </Col>
-                <Col span={8}>
+                <Col xs={24} sm={8}>
                   <Statistic
                     title="Số nguyên liệu"
                     value={result.ingredients.length}
                     suffix="loại"
                   />
                 </Col>
-                <Col span={8}>
+                <Col xs={24} sm={8}>
                   <Statistic
                     title="Trạng thái"
                     valueRender={() =>
@@ -473,28 +482,65 @@ export default function EstimatePage() {
 
               {/* Bang nguyen lieu chi tiet */}
               <Divider orientation="left">Chi tiết nguyên liệu</Divider>
-              <Table
-                columns={ingredientColumns}
-                dataSource={result.ingredients}
-                rowKey="ingredientId"
-                pagination={false}
-                size="small"
-                rowClassName={(record) =>
-                  record.shortage > 0 ? 'ant-table-row-warning' : ''
-                }
-                summary={() => (
-                  <Table.Summary.Row>
-                    <Table.Summary.Cell index={0} colSpan={6}>
-                      <strong>Tổng chi phí nguyên liệu</strong>
-                    </Table.Summary.Cell>
-                    <Table.Summary.Cell index={6}>
-                      <strong style={{ color: '#8B6914' }}>
-                        {formatCurrency(result.totalEstimatedCost)}
-                      </strong>
-                    </Table.Summary.Cell>
-                  </Table.Summary.Row>
-                )}
-              />
+              {isMobile ? (
+                /* Mobile: Card list */
+                <>
+                  {result.ingredients.map((ing: any) => (
+                    <div key={ing.ingredientId} style={{
+                      background: ing.shortage > 0 ? '#fff2f0' : '#fafafa',
+                      border: `1px solid ${ing.shortage > 0 ? '#ffccc7' : '#f0f0f0'}`,
+                      borderRadius: 8,
+                      padding: '8px 12px',
+                      marginBottom: 6,
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <strong style={{ fontSize: 13 }}>{ing.ingredientName}</strong>
+                          <Tag style={{ margin: 0, fontSize: 10 }}>{ing.unit}</Tag>
+                        </div>
+                        {ing.shortage > 0 ? (
+                          <Tag color="red" style={{ margin: 0, fontSize: 11 }}>-{Number(ing.shortage).toLocaleString()}</Tag>
+                        ) : (
+                          <Tag color="green" style={{ margin: 0, fontSize: 11 }}>Đủ</Tag>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#666' }}>
+                        <span>Cần: <strong>{Number(ing.totalNeeded).toLocaleString()}</strong></span>
+                        <span>Kho: <span style={{ color: ing.shortage > 0 ? '#ff4d4f' : '#52c41a', fontWeight: 600 }}>{Number(ing.currentStock).toLocaleString()}</span></span>
+                        <strong style={{ color: '#8B6914' }}>{formatCurrency(ing.estimatedCost)}</strong>
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderTop: '2px solid #f0f0f0', marginTop: 4 }}>
+                    <strong>Tổng chi phí nguyên liệu</strong>
+                    <strong style={{ color: '#8B6914' }}>{formatCurrency(result.totalEstimatedCost)}</strong>
+                  </div>
+                </>
+              ) : (
+                <Table
+                  columns={ingredientColumns}
+                  dataSource={result.ingredients}
+                  rowKey="ingredientId"
+                  pagination={false}
+                  size="small"
+                  scroll={{ x: 700 }}
+                  rowClassName={(record) =>
+                    record.shortage > 0 ? 'ant-table-row-warning' : ''
+                  }
+                  summary={() => (
+                    <Table.Summary.Row>
+                      <Table.Summary.Cell index={0} colSpan={6}>
+                        <strong>Tổng chi phí nguyên liệu</strong>
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={6}>
+                        <strong style={{ color: '#8B6914' }}>
+                          {formatCurrency(result.totalEstimatedCost)}
+                        </strong>
+                      </Table.Summary.Cell>
+                    </Table.Summary.Row>
+                  )}
+                />
+              )}
             </Card>
           ) : (
             <Card>
@@ -519,7 +565,7 @@ export default function EstimatePage() {
       >
         {/* Header */}
         <div style={{
-          padding: '20px 24px 16px',
+          padding: '16px 16px 12px',
           borderBottom: '1px solid #f0f0f0',
           background: 'linear-gradient(135deg, #faf6ed 0%, #fff 100%)',
         }}>
@@ -543,7 +589,7 @@ export default function EstimatePage() {
           </div>
         </div>
 
-        <div style={{ padding: '16px 24px 24px', maxHeight: '65vh', overflowY: 'auto' }}>
+        <div style={{ padding: '12px 16px 20px', maxHeight: '65vh', overflowY: 'auto' }}>
           {recipeModalLoading ? (
             <div style={{ textAlign: 'center', padding: 48 }}>
               <Spin size="large" />
@@ -604,8 +650,8 @@ export default function EstimatePage() {
                       transition: 'all 0.2s',
                     }}
                     title={
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                           <Tag
                             color={isHighlighted || selectedSizeId ? '#8B6914' : 'default'}
                             style={{
@@ -613,6 +659,7 @@ export default function EstimatePage() {
                               fontWeight: 600,
                               fontSize: 13,
                               padding: '2px 10px',
+                              margin: 0,
                             }}
                           >
                             {label}
@@ -620,7 +667,7 @@ export default function EstimatePage() {
                           {isHighlighted && (
                             <Tag
                               color="green"
-                              style={{ borderRadius: 4, fontSize: 11 }}
+                              style={{ borderRadius: 4, fontSize: 11, margin: 0 }}
                             >
                               Đang dùng
                             </Tag>
@@ -649,30 +696,63 @@ export default function EstimatePage() {
                         </Text>
                       </div>
                     )}
-                    <Table
-                      columns={recipeColumns}
-                      dataSource={[...recipe.items].sort((a, b) =>
-                        a.ingredient?.name?.localeCompare(b.ingredient?.name || '') || 0,
-                      )}
-                      rowKey="id"
-                      pagination={false}
-                      size="small"
-                      style={{ fontSize: 13 }}
-                      summary={() => (
-                        <Table.Summary.Row
-                          style={{ background: '#faf8f3' }}
-                        >
-                          <Table.Summary.Cell index={0} colSpan={4}>
-                            <strong>Tổng chi phí / 1 sản phẩm</strong>
-                          </Table.Summary.Cell>
-                          <Table.Summary.Cell index={4} align="right">
-                            <strong style={{ color: '#8B6914', fontSize: 14 }}>
-                              {formatCurrency(totalCost)}
+                    {isMobile ? (
+                      /* Mobile: Card list */
+                      <>
+                        {[...recipe.items].sort((a, b) =>
+                          a.ingredient?.name?.localeCompare(b.ingredient?.name || '') || 0,
+                        ).map((item: any) => (
+                          <div key={item.id} style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            padding: '6px 0',
+                            borderBottom: '1px solid #f5f5f5',
+                            fontSize: 13,
+                          }}>
+                            <div>
+                              <strong>{item.ingredient?.name}</strong>
+                              <span style={{ color: '#999', marginLeft: 4, fontSize: 12 }}>
+                                {Number(item.quantity).toLocaleString()} {item.ingredient?.unit}
+                              </span>
+                            </div>
+                            <strong style={{ color: '#8B6914' }}>
+                              {formatCurrency(Number(item.quantity) * Number(item.ingredient?.costPerUnit ?? 0))}
                             </strong>
-                          </Table.Summary.Cell>
-                        </Table.Summary.Row>
-                      )}
-                    />
+                          </div>
+                        ))}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderTop: '2px solid #f0f0f0', marginTop: 4 }}>
+                          <strong style={{ fontSize: 13 }}>Tổng / 1 SP</strong>
+                          <strong style={{ color: '#8B6914', fontSize: 14 }}>{formatCurrency(totalCost)}</strong>
+                        </div>
+                      </>
+                    ) : (
+                      <Table
+                        columns={recipeColumns}
+                        dataSource={[...recipe.items].sort((a, b) =>
+                          a.ingredient?.name?.localeCompare(b.ingredient?.name || '') || 0,
+                        )}
+                        rowKey="id"
+                        pagination={false}
+                        size="small"
+                        scroll={{ x: 450 }}
+                        style={{ fontSize: 13 }}
+                        summary={() => (
+                          <Table.Summary.Row
+                            style={{ background: '#faf8f3' }}
+                          >
+                            <Table.Summary.Cell index={0} colSpan={3}>
+                              <strong>Tổng chi phí / 1 sản phẩm</strong>
+                            </Table.Summary.Cell>
+                            <Table.Summary.Cell index={3} align="right">
+                              <strong style={{ color: '#8B6914', fontSize: 14 }}>
+                                {formatCurrency(totalCost)}
+                              </strong>
+                            </Table.Summary.Cell>
+                          </Table.Summary.Row>
+                        )}
+                      />
+                    )}
                   </Card>
                 );
               });

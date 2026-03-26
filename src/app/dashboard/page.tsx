@@ -19,6 +19,15 @@ export default function DashboardPage() {
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
   const [lowStockIngredients, setLowStockIngredients] = useState<Ingredient[]>([]);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    setIsMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -164,24 +173,67 @@ export default function DashboardPage() {
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={14}>
           <Card title="Đơn hàng gần đây">
-            <Table
-              columns={orderColumns}
-              dataSource={recentOrders}
-              rowKey="id"
-              pagination={false}
-              size="small"
-            />
+            {isMobile ? (
+              recentOrders.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 24, color: '#999' }}>Chưa có đơn hàng</div>
+              ) : (
+                recentOrders.map((order) => {
+                  const s = orderStatusMap[order.status] || { label: order.status, color: 'default' };
+                  return (
+                    <div key={order.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #f5f5f5' }}>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 500 }}>{order.customerName}</div>
+                        <div style={{ fontSize: 11, color: '#999' }}>{formatDateTime(order.createdAt)}</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontWeight: 600, color: '#8B6914', fontSize: 13 }}>{formatCurrency(order.totalAmount)}</div>
+                        <Tag color={s.color} style={{ margin: 0, fontSize: 10 }}>{s.label}</Tag>
+                      </div>
+                    </div>
+                  );
+                })
+              )
+            ) : (
+              <Table
+                columns={orderColumns}
+                dataSource={recentOrders}
+                rowKey="id"
+                pagination={false}
+                size="small"
+                scroll={{ x: 600 }}
+              />
+            )}
           </Card>
         </Col>
         <Col xs={24} lg={10}>
           <Card title="Nguyên liệu tồn kho thấp">
-            <Table
-              columns={lowStockColumns}
-              dataSource={lowStockIngredients}
-              rowKey="id"
-              pagination={false}
-              size="small"
-            />
+            {isMobile ? (
+              lowStockIngredients.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 24, color: '#999' }}>Tất cả đều đủ</div>
+              ) : (
+                lowStockIngredients.map((item) => (
+                  <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #f5f5f5' }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 500 }}>{item.name}</div>
+                      <Tag style={{ fontSize: 10, margin: 0 }}>{item.unit}</Tag>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <span style={{ color: '#ff4d4f', fontWeight: 600, fontSize: 13 }}>{Number(item.currentStock).toLocaleString()}</span>
+                      <span style={{ color: '#999', fontSize: 12 }}> / {Number(item.minStock).toLocaleString()}</span>
+                    </div>
+                  </div>
+                ))
+              )
+            ) : (
+              <Table
+                columns={lowStockColumns}
+                dataSource={lowStockIngredients}
+                rowKey="id"
+                pagination={false}
+                size="small"
+                scroll={{ x: 400 }}
+              />
+            )}
           </Card>
         </Col>
       </Row>
