@@ -56,8 +56,10 @@ export default function IngredientsPage() {
   const [imageUrl, setImageUrl] = useState<string>('');
   const [imageList, setImageList] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm();
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
+  const [isMobile, setIsMobile] = useState(false);
 
   // Lịch sử nhập/xuất kho
   const [historyData, setHistoryData] = useState<InventoryTransaction[]>([]);
@@ -114,6 +116,14 @@ export default function IngredientsPage() {
   }, [detailIngredient?.id]);
 
   useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    setIsMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
+  useEffect(() => {
     fetchIngredients();
     fetchLowStock();
   }, []);
@@ -161,6 +171,7 @@ export default function IngredientsPage() {
   };
 
   const handleSubmit = async (values: any) => {
+    setSubmitting(true);
     try {
       if (editing) {
         await ingredientsApi.update(editing.id, values);
@@ -178,6 +189,8 @@ export default function IngredientsPage() {
       fetchLowStock();
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Có lỗi xảy ra');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -290,7 +303,7 @@ export default function IngredientsPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
         <Title level={3} style={{ margin: 0 }}>
           Quản lý nguyên liệu
         </Title>
@@ -321,18 +334,76 @@ export default function IngredientsPage() {
       )}
 
       <Card>
-        <Table
-          columns={columns}
-          dataSource={ingredients}
-          rowKey="id"
-          loading={loading}
-          pagination={{
-            current: pagination.current,
-            pageSize: pagination.pageSize,
-            total: pagination.total,
-            onChange: (page) => fetchIngredients(page),
-          }}
-        />
+        {isMobile ? (
+          /* Mobile: Card List */
+          <Spin spinning={loading}>
+            {ingredients.length === 0 && !loading ? (
+              <div style={{ textAlign: 'center', padding: 32, color: '#999' }}>Không có nguyên liệu</div>
+            ) : (
+              <>
+                {ingredients.map((item) => {
+                  const isLow = Number(item.currentStock) <= Number(item.minStock) && Number(item.minStock) > 0;
+                  return (
+                    <div key={item.id} onClick={() => setDetailIngredient(item)} style={{ background: '#fff', border: '1px solid #f0f0f0', borderRadius: 10, padding: '12px 14px', marginBottom: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.04)', cursor: 'pointer' }}>
+                      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 6 }}>
+                        {item.imageUrl ? (
+                          <img src={getFullImageUrl(item.imageUrl)} alt={item.name} width={40} height={40} style={{ borderRadius: 6, objectFit: 'cover', flexShrink: 0 }} />
+                        ) : (
+                          <div style={{ width: 40, height: 40, borderRadius: 6, background: '#f5f5f5', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ccc', fontSize: 10 }}>N/A</div>
+                        )}
+                        <div style={{ flex: 1 }}>
+                          <strong style={{ color: '#8B6914', fontSize: 14 }}>{item.name}</strong>
+                          <Tag style={{ marginLeft: 6 }}>{item.unit}</Tag>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ fontSize: 13 }}>
+                          <span style={{ color: isLow ? '#ff4d4f' : '#52c41a', fontWeight: 600 }}>
+                            {Number(item.currentStock).toLocaleString()} {item.unit}
+                            {isLow && ' \u26a0'}
+                          </span>
+                          <span style={{ color: '#999', marginLeft: 8, fontSize: 12 }}>/ {Number(item.minStock).toLocaleString()}</span>
+                        </div>
+                        <span style={{ fontSize: 13, color: '#666' }}>{formatCurrency(Number(item.costPerUnit))}/{item.unit}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4, marginTop: 6, borderTop: '1px solid #f5f5f5', paddingTop: 6 }} onClick={(e) => e.stopPropagation()}>
+                        <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(item)} />
+                        <Popconfirm title="Xác nhận xoá?" onConfirm={() => handleDelete(item.id)}>
+                          <Button size="small" danger icon={<DeleteOutlined />} />
+                        </Popconfirm>
+                      </div>
+                    </div>
+                  );
+                })}
+                {/* Pagination */}
+                {pagination.total > pagination.pageSize && (
+                  <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                    <Space>
+                      <Button size="small" disabled={pagination.current <= 1} onClick={() => fetchIngredients(pagination.current - 1)}>Trước</Button>
+                      <span style={{ fontSize: 13, color: '#666' }}>Trang {pagination.current} / {Math.ceil(pagination.total / pagination.pageSize)}</span>
+                      <Button size="small" disabled={pagination.current >= Math.ceil(pagination.total / pagination.pageSize)} onClick={() => fetchIngredients(pagination.current + 1)}>Sau</Button>
+                    </Space>
+                  </div>
+                )}
+              </>
+            )}
+          </Spin>
+        ) : (
+          /* Desktop: Table */
+          <Table
+            columns={columns}
+            dataSource={ingredients}
+            rowKey="id"
+            loading={loading}
+            scroll={{ x: 700 }}
+            pagination={{
+              current: pagination.current,
+              pageSize: pagination.pageSize,
+              total: pagination.total,
+              onChange: (page) => fetchIngredients(page),
+            }}
+          />
+        )}
       </Card>
 
       {/* Modal thêm/sửa nguyên liệu */}
@@ -347,6 +418,8 @@ export default function IngredientsPage() {
           setImageList([]);
         }}
         onOk={() => form.submit()}
+        okButtonProps={{ loading: submitting }}
+        cancelButtonProps={{ disabled: submitting }}
         width={550}
       >
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
@@ -474,7 +547,7 @@ export default function IngredientsPage() {
               <Divider style={{ margin: '8px 0 12px' }} />
 
               {/* Thông tin chi tiết */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 24px', fontSize: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px 24px', fontSize: 14 }}>
                 <div>
                   <span style={{ color: '#888' }}>Đơn vị:</span> <Tag>{detailIngredient.unit}</Tag>
                 </div>
@@ -514,67 +587,114 @@ export default function IngredientsPage() {
 
               <Spin spinning={historyLoading}>
                 {historyData.length > 0 ? (
-                  <Table
-                    dataSource={historyData}
-                    rowKey="id"
-                    size="small"
-                    pagination={{
-                      current: historyPagination.current,
-                      pageSize: historyPagination.pageSize,
-                      total: historyPagination.total,
-                      size: 'small',
-                      showTotal: (total) => `${total} giao dịch`,
-                      onChange: (page) => fetchHistory(detailIngredient.id, page),
-                    }}
-                    columns={[
-                      {
-                        title: 'Loại',
-                        dataIndex: 'type',
-                        key: 'type',
-                        width: 70,
-                        render: (type: string) => (
-                          type === 'IN'
-                            ? <Tag color="green"><ArrowDownOutlined /> Nhập</Tag>
-                            : <Tag color="red"><ArrowUpOutlined /> Xuất</Tag>
-                        ),
-                      },
-                      {
-                        title: 'Số lượng',
-                        dataIndex: 'quantity',
-                        key: 'quantity',
-                        width: 100,
-                        render: (qty: number, record: any) => (
-                          <span style={{ fontWeight: 500, color: record.type === 'IN' ? '#52c41a' : '#ff4d4f' }}>
-                            {record.type === 'IN' ? '+' : '-'}{Number(qty).toLocaleString()} {detailIngredient.unit}
-                          </span>
-                        ),
-                      },
-                      {
-                        title: 'Lý do',
-                        dataIndex: 'reason',
-                        key: 'reason',
-                        width: 100,
-                        render: (reason: string) => {
-                          const r = reasonMap[reason] || { label: reason, color: 'default' };
-                          return <Tag color={r.color}>{r.label}</Tag>;
+                  isMobile ? (
+                    /* Mobile: Card list */
+                    <>
+                      {historyData.map((tx: any) => {
+                        const isIn = tx.type === 'IN';
+                        const r = reasonMap[tx.reason] || { label: tx.reason, color: 'default' };
+                        return (
+                          <div key={tx.id} style={{
+                            background: isIn ? '#f6ffed' : '#fff2f0',
+                            border: `1px solid ${isIn ? '#b7eb8f' : '#ffccc7'}`,
+                            borderRadius: 8,
+                            padding: '8px 12px',
+                            marginBottom: 6,
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                {isIn
+                                  ? <Tag color="green" style={{ margin: 0, fontSize: 11 }}><ArrowDownOutlined /> Nhập</Tag>
+                                  : <Tag color="red" style={{ margin: 0, fontSize: 11 }}><ArrowUpOutlined /> Xuất</Tag>
+                                }
+                                <strong style={{ color: isIn ? '#52c41a' : '#ff4d4f', fontSize: 14 }}>
+                                  {isIn ? '+' : '-'}{Number(tx.quantity).toLocaleString()} {detailIngredient.unit}
+                                </strong>
+                              </div>
+                              <Tag color={r.color} style={{ margin: 0, fontSize: 11 }}>{r.label}</Tag>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#999' }}>
+                              <span>{tx.notes || '—'}</span>
+                              <span>{formatDateTime(tx.createdAt)}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {historyPagination.total > historyPagination.pageSize && (
+                        <div style={{ textAlign: 'center', padding: '8px 0' }}>
+                          <Space>
+                            <Button size="small" disabled={historyPagination.current <= 1} onClick={() => fetchHistory(detailIngredient.id, historyPagination.current - 1)}>Trước</Button>
+                            <span style={{ fontSize: 12, color: '#999' }}>{historyPagination.total} giao dịch</span>
+                            <Button size="small" disabled={historyPagination.current >= Math.ceil(historyPagination.total / historyPagination.pageSize)} onClick={() => fetchHistory(detailIngredient.id, historyPagination.current + 1)}>Sau</Button>
+                          </Space>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    /* Desktop: Table */
+                    <Table
+                      dataSource={historyData}
+                      rowKey="id"
+                      size="small"
+                      scroll={{ x: 500 }}
+                      pagination={{
+                        current: historyPagination.current,
+                        pageSize: historyPagination.pageSize,
+                        total: historyPagination.total,
+                        size: 'small',
+                        showTotal: (total) => `${total} giao dịch`,
+                        onChange: (page) => fetchHistory(detailIngredient.id, page),
+                      }}
+                      columns={[
+                        {
+                          title: 'Loại',
+                          dataIndex: 'type',
+                          key: 'type',
+                          width: 70,
+                          render: (type: string) => (
+                            type === 'IN'
+                              ? <Tag color="green"><ArrowDownOutlined /> Nhập</Tag>
+                              : <Tag color="red"><ArrowUpOutlined /> Xuất</Tag>
+                          ),
                         },
-                      },
-                      {
-                        title: 'Ghi chú',
-                        dataIndex: 'notes',
-                        key: 'notes',
-                        ellipsis: true,
-                        render: (notes: string) => notes || '—',
-                      },
-                      {
-                        title: 'Thời gian',
-                        dataIndex: 'createdAt',
-                        key: 'createdAt',
-                        width: 140,
-                        render: (d: string) => formatDateTime(d),
-                      },
-                    ]}
-                  />
+                        {
+                          title: 'Số lượng',
+                          dataIndex: 'quantity',
+                          key: 'quantity',
+                          width: 100,
+                          render: (qty: number, record: any) => (
+                            <span style={{ fontWeight: 500, color: record.type === 'IN' ? '#52c41a' : '#ff4d4f' }}>
+                              {record.type === 'IN' ? '+' : '-'}{Number(qty).toLocaleString()} {detailIngredient.unit}
+                            </span>
+                          ),
+                        },
+                        {
+                          title: 'Lý do',
+                          dataIndex: 'reason',
+                          key: 'reason',
+                          width: 100,
+                          render: (reason: string) => {
+                            const r = reasonMap[reason] || { label: reason, color: 'default' };
+                            return <Tag color={r.color}>{r.label}</Tag>;
+                          },
+                        },
+                        {
+                          title: 'Ghi chú',
+                          dataIndex: 'notes',
+                          key: 'notes',
+                          ellipsis: true,
+                          render: (notes: string) => notes || '—',
+                        },
+                        {
+                          title: 'Thời gian',
+                          dataIndex: 'createdAt',
+                          key: 'createdAt',
+                          width: 140,
+                          render: (d: string) => formatDateTime(d),
+                        },
+                      ]}
+                    />
+                  )
                 ) : (
                   !historyLoading && (
                     <Empty

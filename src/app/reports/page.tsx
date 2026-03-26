@@ -215,7 +215,7 @@ export default function ReportsPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
         <Title level={3} style={{ margin: 0 }}>
           Báo cáo doanh thu & chi phí
         </Title>
@@ -403,7 +403,7 @@ export default function ReportsPage() {
                     <YAxis
                       type="category"
                       dataKey="displayName"
-                      width={140}
+                      width={100}
                       fontSize={12}
                       tick={{ fill: '#333' }}
                     />
@@ -435,6 +435,7 @@ export default function ReportsPage() {
                 rowKey={(r) => `${r.productId}-${r.sizeId || 'default'}`}
                 pagination={false}
                 size="small"
+                scroll={{ x: 400 }}
               />
             </Card>
           </Col>

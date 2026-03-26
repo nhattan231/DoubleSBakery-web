@@ -17,6 +17,7 @@ import {
   Tabs,
   Input,
   Radio,
+  Spin,
   message,
 } from 'antd';
 import {
@@ -70,7 +71,16 @@ export default function EstimateHistoryPage() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailData, setDetailData] = useState<EstimateHistoryItem | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    setIsMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   const fetchData = useCallback(
     async (page = 1) => {
@@ -400,7 +410,7 @@ export default function EstimateHistoryPage() {
         onChange={(dates) => handleRangeChange(dates as [dayjs.Dayjs, dayjs.Dayjs] | null)}
         format="DD/MM/YYYY"
         placeholder={['Từ ngày', 'Đến ngày']}
-        style={{ width: 240 }}
+        style={{ width: 240, minWidth: 200, flex: '1 1 200px' }}
         allowClear
       />
 
@@ -413,7 +423,7 @@ export default function EstimateHistoryPage() {
         allowClear
         onSearch={(value) => handleSearchChange(value)}
         onChange={(e) => handleSearchDebounce(e.target.value)}
-        style={{ width: 200 }}
+        style={{ width: 200, minWidth: 160, flex: '1 1 160px' }}
       />
 
       <Button icon={<ReloadOutlined />} onClick={() => fetchData()}>
@@ -425,20 +435,86 @@ export default function EstimateHistoryPage() {
   const tableContent = (
     <>
       {filterBar}
-      <Table
-        columns={columns}
-        dataSource={data}
-        rowKey="id"
-        loading={loading}
-        pagination={{
-          current: pagination.page,
-          pageSize: pagination.limit,
-          total: pagination.total,
-          showSizeChanger: false,
-          showTotal: (total) => `Tổng ${total} bản ghi`,
-          onChange: (page) => fetchData(page),
-        }}
-      />
+      {isMobile ? (
+        <Spin spinning={loading}>
+          {data.length === 0 && !loading ? (
+            <div style={{ textAlign: 'center', padding: 32, color: '#999' }}>Không có dữ liệu</div>
+          ) : (
+            <>
+              {data.map((item) => (
+                <div
+                  key={item.id}
+                  onClick={() => handleViewDetail(item.id)}
+                  style={{
+                    background: '#fff',
+                    border: '1px solid #f0f0f0',
+                    borderRadius: 10,
+                    padding: '12px 14px',
+                    marginBottom: 10,
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {/* Row 1: Thời gian + Trạng thái */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <span style={{ fontSize: 12, color: '#999' }}>{formatDateTime(item.createdAt)}</span>
+                    {item.hasShortage ? (
+                      <Tag color="red" icon={<WarningOutlined />} style={{ margin: 0, fontSize: 11 }}>Thiếu NL</Tag>
+                    ) : (
+                      <Tag color="green" icon={<CheckCircleOutlined />} style={{ margin: 0, fontSize: 11 }}>Đủ NL</Tag>
+                    )}
+                  </div>
+                  {/* Row 2: Mã đơn (nếu ORDER) hoặc Sản phẩm */}
+                  {activeTab === 'ORDER' && item.orderNumber && (
+                    <div style={{ marginBottom: 4 }}>
+                      <Tag color="blue" style={{ fontWeight: 600, fontSize: 12 }}>{item.orderNumber}</Tag>
+                    </div>
+                  )}
+                  {/* Row 3: Sản phẩm tags */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+                    {item.products.map((p, i) => (
+                      <Tag key={i} style={{ fontSize: 11, margin: 0 }}>
+                        {p.productName}{p.sizeName ? ` (${p.sizeName})` : ''} x{p.quantity}
+                      </Tag>
+                    ))}
+                  </div>
+                  {/* Row 4: Chi phí + Người tạo */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 12, color: '#999' }}>{item.creator?.name || ''}</span>
+                    <strong style={{ fontSize: 15, color: '#8B6914' }}>{formatCurrency(item.totalEstimatedCost)}</strong>
+                  </div>
+                </div>
+              ))}
+              {/* Pagination */}
+              {pagination.total > pagination.limit && (
+                <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                  <Space>
+                    <Button size="small" disabled={pagination.page <= 1} onClick={() => fetchData(pagination.page - 1)}>Trước</Button>
+                    <span style={{ fontSize: 13, color: '#666' }}>Trang {pagination.page} / {pagination.totalPages}</span>
+                    <Button size="small" disabled={pagination.page >= pagination.totalPages} onClick={() => fetchData(pagination.page + 1)}>Sau</Button>
+                  </Space>
+                </div>
+              )}
+            </>
+          )}
+        </Spin>
+      ) : (
+        <Table
+          columns={columns}
+          dataSource={data}
+          rowKey="id"
+          loading={loading}
+          scroll={{ x: 800 }}
+          pagination={{
+            current: pagination.page,
+            pageSize: pagination.limit,
+            total: pagination.total,
+            showSizeChanger: false,
+            showTotal: (total) => `Tổng ${total} bản ghi`,
+            onChange: (page) => fetchData(page),
+          }}
+        />
+      )}
     </>
   );
 
@@ -501,21 +577,21 @@ export default function EstimateHistoryPage() {
             )}
 
             <Row gutter={16} style={{ marginBottom: 16 }}>
-              <Col span={8}>
+              <Col xs={24} sm={8}>
                 <Statistic
                   title="Tổng chi phí NL"
                   value={detailData.totalEstimatedCost}
                   formatter={(val) => formatCurrency(Number(val))}
                 />
               </Col>
-              <Col span={8}>
+              <Col xs={24} sm={8}>
                 <Statistic
                   title="Số nguyên liệu"
                   value={detailData.ingredients.length}
                   suffix="loại"
                 />
               </Col>
-              <Col span={8}>
+              <Col xs={24} sm={8}>
                 <Statistic
                   title="Trạng thái"
                   valueRender={() =>
@@ -544,28 +620,65 @@ export default function EstimateHistoryPage() {
             </div>
 
             <Divider orientation="left">Chi tiết nguyên liệu</Divider>
-            <Table
-              columns={ingredientColumns}
-              dataSource={detailData.ingredients}
-              rowKey="ingredientId"
-              pagination={false}
-              size="small"
-              rowClassName={(record) =>
-                record.shortage > 0 ? 'ant-table-row-warning' : ''
-              }
-              summary={() => (
-                <Table.Summary.Row>
-                  <Table.Summary.Cell index={0} colSpan={6}>
-                    <strong>Tổng chi phí nguyên liệu</strong>
-                  </Table.Summary.Cell>
-                  <Table.Summary.Cell index={6}>
-                    <strong style={{ color: '#8B6914' }}>
-                      {formatCurrency(detailData.totalEstimatedCost)}
-                    </strong>
-                  </Table.Summary.Cell>
-                </Table.Summary.Row>
-              )}
-            />
+            {isMobile ? (
+              /* Mobile: Card list */
+              <>
+                {detailData.ingredients.map((ing: any) => (
+                  <div key={ing.ingredientId} style={{
+                    background: ing.shortage > 0 ? '#fff2f0' : '#fafafa',
+                    border: `1px solid ${ing.shortage > 0 ? '#ffccc7' : '#f0f0f0'}`,
+                    borderRadius: 8,
+                    padding: '8px 12px',
+                    marginBottom: 6,
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <strong style={{ fontSize: 13 }}>{ing.ingredientName}</strong>
+                        <Tag style={{ margin: 0, fontSize: 10 }}>{ing.unit}</Tag>
+                      </div>
+                      {ing.shortage > 0 ? (
+                        <Tag color="red" style={{ margin: 0, fontSize: 11 }}>-{Number(ing.shortage).toLocaleString()}</Tag>
+                      ) : (
+                        <Tag color="green" style={{ margin: 0, fontSize: 11 }}>Đủ</Tag>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#666' }}>
+                      <span>Cần: <strong>{Number(ing.totalNeeded).toLocaleString()}</strong></span>
+                      <span>Kho: <span style={{ color: ing.shortage > 0 ? '#ff4d4f' : '#52c41a', fontWeight: 600 }}>{Number(ing.currentStock).toLocaleString()}</span></span>
+                      <strong style={{ color: '#8B6914' }}>{formatCurrency(ing.estimatedCost)}</strong>
+                    </div>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderTop: '2px solid #f0f0f0', marginTop: 4 }}>
+                  <strong>Tổng chi phí nguyên liệu</strong>
+                  <strong style={{ color: '#8B6914' }}>{formatCurrency(detailData.totalEstimatedCost)}</strong>
+                </div>
+              </>
+            ) : (
+              <Table
+                columns={ingredientColumns}
+                dataSource={detailData.ingredients}
+                rowKey="ingredientId"
+                pagination={false}
+                size="small"
+                scroll={{ x: 700 }}
+                rowClassName={(record) =>
+                  record.shortage > 0 ? 'ant-table-row-warning' : ''
+                }
+                summary={() => (
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell index={0} colSpan={6}>
+                      <strong>Tổng chi phí nguyên liệu</strong>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={6}>
+                      <strong style={{ color: '#8B6914' }}>
+                        {formatCurrency(detailData.totalEstimatedCost)}
+                      </strong>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                )}
+              />
+            )}
 
             <div style={{ marginTop: 12, color: '#999', fontSize: 12 }}>
               Tạo lúc: {formatDateTime(detailData.createdAt)}

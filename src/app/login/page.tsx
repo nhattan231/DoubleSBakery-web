@@ -46,11 +46,13 @@ export default function LoginPage() {
         alignItems: 'center',
         justifyContent: 'center',
         background: 'linear-gradient(135deg, #FFF8F0 0%, #FFE4C9 100%)',
+        padding: 16,
       }}
     >
       <Card
         style={{
-          width: 400,
+          width: '100%',
+          maxWidth: 400,
           boxShadow: '0 4px 24px rgba(0,0,0,0.1)',
           borderRadius: 12,
         }}

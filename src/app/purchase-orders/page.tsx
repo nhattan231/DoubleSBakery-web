@@ -26,6 +26,7 @@ import {
   DatePicker,
   Row,
   Col,
+  Spin,
 } from 'antd';
 import dayjs from 'dayjs';
 import {
@@ -139,6 +140,7 @@ function IngredientRow({
 
   return (
     <div
+      className="po-ingredient-row"
       style={{
         display: 'flex',
         gap: 8,
@@ -302,9 +304,14 @@ export default function PurchaseOrdersPage() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null);
   const [formDirty, setFormDirty] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm();
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
   const [selectedIngredientMap, setSelectedIngredientMap] = useState<Record<number, string>>({});
+
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobilePage, setMobilePage] = useState(1);
+  const MOBILE_PAGE_SIZE = 10;
 
   // Filter states
   const [filterStatus, setFilterStatus] = useState<string>('all');
@@ -366,6 +373,15 @@ export default function PurchaseOrdersPage() {
         }
       }
     } catch { /* ignore */ }
+  }, []);
+
+  // Detect mobile
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    setIsMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
   }, []);
 
   // ========== Ingredient map O(1) ==========
@@ -479,6 +495,7 @@ export default function PurchaseOrdersPage() {
   );
 
   const handleCreate = useCallback(async (values: any) => {
+    setSubmitting(true);
     try {
       const poData = {
         supplierId: values.supplierId,
@@ -500,6 +517,8 @@ export default function PurchaseOrdersPage() {
       fetchPOs(pagination.current);
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Có lỗi xảy ra');
+    } finally {
+      setSubmitting(false);
     }
   }, [form, fetchPOs, pagination.current]);
 
@@ -923,21 +942,114 @@ export default function PurchaseOrdersPage() {
       </Card>
 
       <Card>
-        <Table
-          columns={columns}
-          dataSource={filteredPOs}
-          rowKey="id"
-          loading={loading}
-          pagination={{
-            current: pagination.current,
-            pageSize: pagination.pageSize,
-            total: filteredPOs.length,
-            onChange: (page) => setPagination((prev) => ({ ...prev, current: page })),
-            showSizeChanger: true,
-            showTotal: (total) => `Tổng ${total} phiếu`,
-          }}
-          locale={{ emptyText: hasActiveFilters ? 'Không tìm thấy phiếu nhập phù hợp' : 'Chưa có phiếu nhập nào' }}
-        />
+        {isMobile ? (
+          loading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+          ) : filteredPOs.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>
+              {hasActiveFilters ? 'Không tìm thấy phiếu nhập phù hợp' : 'Chưa có phiếu nhập nào'}
+            </div>
+          ) : (
+            <>
+              {filteredPOs.slice((mobilePage - 1) * MOBILE_PAGE_SIZE, mobilePage * MOBILE_PAGE_SIZE).map((po) => (
+                <div key={po.id} style={{ background: '#fff', border: '1px solid #f0f0f0', borderRadius: 10, padding: '12px 14px', marginBottom: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <strong style={{ fontSize: 13, color: '#333' }}>{po.poNumber}</strong>
+                    <Tag color={poStatusMap[po.status]?.color} style={{ margin: 0, fontSize: 11 }}>{poStatusMap[po.status]?.label}</Tag>
+                  </div>
+                  <div style={{ fontSize: 13, color: '#666', marginBottom: 4 }}>NCC: {po.supplier?.name || '-'}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <span style={{ fontSize: 12, color: '#999' }}>{formatDateTime(po.createdAt)}</span>
+                    <strong style={{ fontSize: 15, color: '#8B6914' }}>{formatCurrency(po.totalCost)}</strong>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', borderTop: '1px solid #f5f5f5', paddingTop: 6 }}>
+                    <Button size="small" icon={<EyeOutlined />} onClick={() => viewDetail(po)}>Chi tiết</Button>
+
+                    {/* draft -> confirmed */}
+                    {po.status === 'draft' && (
+                      <Popconfirm
+                        title="Xác nhận đơn hàng này?"
+                        description="Đơn hàng sẽ được duyệt. Tồn kho chưa thay đổi — chỉ cộng khi nhận hàng."
+                        onConfirm={() => handleConfirm(po.id)}
+                        okText="Xác nhận"
+                        cancelText="Không"
+                      >
+                        <Button size="small" type="primary" icon={<CheckCircleOutlined />}>Xác nhận</Button>
+                      </Popconfirm>
+                    )}
+
+                    {/* confirmed -> received */}
+                    {po.status === 'confirmed' && (
+                      <Popconfirm
+                        title="Xác nhận đã nhận hàng & nhập kho?"
+                        description="Tồn kho sẽ được cộng thêm theo số lượng trong phiếu. Giá mua nguyên liệu sẽ được cập nhật."
+                        onConfirm={() => handleReceived(po.id)}
+                        okText="Nhận hàng & Nhập kho"
+                        cancelText="Chưa nhận"
+                      >
+                        <Button size="small" type="primary" style={{ backgroundColor: '#52c41a', borderColor: '#52c41a' }} icon={<CheckCircleOutlined />}>Nhận hàng</Button>
+                      </Popconfirm>
+                    )}
+
+                    {/* draft | confirmed -> cancelled */}
+                    {(po.status === 'draft' || po.status === 'confirmed') && (
+                      <Popconfirm
+                        title="Huỷ phiếu nhập này?"
+                        description="Phiếu sẽ bị huỷ vĩnh viễn. Tồn kho không bị ảnh hưởng vì chưa nhận hàng."
+                        onConfirm={() => handleCancel(po.id)}
+                        okText="Huỷ phiếu"
+                        cancelText="Giữ lại"
+                        okButtonProps={{ danger: true }}
+                      >
+                        <Button size="small" danger icon={<DeleteOutlined />}>Huỷ</Button>
+                      </Popconfirm>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              {/* Mobile pagination */}
+              {filteredPOs.length > MOBILE_PAGE_SIZE && (
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, marginTop: 12, paddingTop: 8 }}>
+                  <Button
+                    size="small"
+                    disabled={mobilePage <= 1}
+                    onClick={() => setMobilePage((p) => p - 1)}
+                  >
+                    ← Trước
+                  </Button>
+                  <span style={{ fontSize: 13, color: '#666' }}>
+                    {mobilePage} / {Math.ceil(filteredPOs.length / MOBILE_PAGE_SIZE)}
+                  </span>
+                  <Button
+                    size="small"
+                    disabled={mobilePage >= Math.ceil(filteredPOs.length / MOBILE_PAGE_SIZE)}
+                    onClick={() => setMobilePage((p) => p + 1)}
+                  >
+                    Sau →
+                  </Button>
+                </div>
+              )}
+            </>
+          )
+        ) : (
+          <Table
+            columns={columns}
+            dataSource={filteredPOs}
+            rowKey="id"
+            loading={loading}
+            scroll={{ x: 900 }}
+            pagination={{
+              current: pagination.current,
+              pageSize: pagination.pageSize,
+              total: filteredPOs.length,
+              onChange: (page) => setPagination((prev) => ({ ...prev, current: page })),
+              showSizeChanger: true,
+              showTotal: (total) => `Tổng ${total} phiếu`,
+            }}
+            locale={{ emptyText: hasActiveFilters ? 'Không tìm thấy phiếu nhập phù hợp' : 'Chưa có phiếu nhập nào' }}
+          />
+        )}
       </Card>
 
       {/* ============ Floating badge: phiếu nháp đang thu nhỏ ============ */}
@@ -1011,6 +1123,8 @@ export default function PurchaseOrdersPage() {
         okText="Tạo phiếu"
         cancelText="Huỷ"
         width={960}
+        okButtonProps={{ loading: submitting }}
+        cancelButtonProps={{ disabled: submitting }}
         destroyOnClose={false}
       >
         <Form
@@ -1366,7 +1480,7 @@ export default function PurchaseOrdersPage() {
       >
         {selectedPO && (
           <>
-            <Descriptions bordered size="small" column={2}>
+            <Descriptions bordered size="small" column={{ xs: 1, sm: 2 }}>
               <Descriptions.Item label="Mã phiếu">{selectedPO.poNumber}</Descriptions.Item>
               <Descriptions.Item label="Trạng thái">
                 <Tag color={poStatusMap[selectedPO.status]?.color}>
@@ -1379,32 +1493,64 @@ export default function PurchaseOrdersPage() {
               </Descriptions.Item>
             </Descriptions>
             <Divider>Nguyên liệu</Divider>
-            <Table
-              dataSource={selectedPO.items}
-              rowKey="id"
-              pagination={false}
-              size="small"
-              columns={[
-                {
-                  title: 'Ảnh',
-                  key: 'image',
-                  width: 50,
-                  render: (_: any, record: any) => (
-                    <img
-                      src={getFullImageUrl(record.ingredient?.imageUrl) || PLACEHOLDER_IMG}
-                      alt=""
-                      style={{ width: 32, height: 32, borderRadius: 4, objectFit: 'cover' }}
-                      onError={(e) => { (e.target as HTMLImageElement).src = PLACEHOLDER_IMG; }}
-                    />
-                  ),
-                },
-                { title: 'Nguyên liệu', dataIndex: ['ingredient', 'name'] },
-                { title: 'Đơn vị', dataIndex: ['ingredient', 'unit'] },
-                { title: 'Số lượng', dataIndex: 'quantity', render: (v: number) => Number(v).toLocaleString() },
-                { title: 'Đơn giá', dataIndex: 'unitPrice', render: (v: number) => formatCurrency(v) },
-                { title: 'Thành tiền', dataIndex: 'subtotal', render: (v: number) => formatCurrency(v) },
-              ]}
-            />
+            {isMobile ? (
+              /* Mobile: Card list */
+              <>
+                {selectedPO.items.map((item: any) => (
+                  <div key={item.id} style={{
+                    background: '#fafafa',
+                    border: '1px solid #f0f0f0',
+                    borderRadius: 8,
+                    padding: '10px 12px',
+                    marginBottom: 8,
+                  }}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                      <img
+                        src={getFullImageUrl(item.ingredient?.imageUrl) || PLACEHOLDER_IMG}
+                        alt=""
+                        style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }}
+                        onError={(e) => { (e.target as HTMLImageElement).src = PLACEHOLDER_IMG; }}
+                      />
+                      <div style={{ flex: 1 }}>
+                        <strong style={{ fontSize: 13 }}>{item.ingredient?.name}</strong>
+                        <Tag style={{ marginLeft: 6, fontSize: 10 }}>{item.ingredient?.unit}</Tag>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#666' }}>
+                      <span>{Number(item.quantity).toLocaleString()} × {formatCurrency(item.unitPrice)}</span>
+                      <strong style={{ color: '#8B6914' }}>{formatCurrency(item.subtotal)}</strong>
+                    </div>
+                  </div>
+                ))}
+              </>
+            ) : (
+              <Table
+                dataSource={selectedPO.items}
+                rowKey="id"
+                pagination={false}
+                size="small"
+                columns={[
+                  {
+                    title: 'Ảnh',
+                    key: 'image',
+                    width: 50,
+                    render: (_: any, record: any) => (
+                      <img
+                        src={getFullImageUrl(record.ingredient?.imageUrl) || PLACEHOLDER_IMG}
+                        alt=""
+                        style={{ width: 32, height: 32, borderRadius: 4, objectFit: 'cover' }}
+                        onError={(e) => { (e.target as HTMLImageElement).src = PLACEHOLDER_IMG; }}
+                      />
+                    ),
+                  },
+                  { title: 'Nguyên liệu', dataIndex: ['ingredient', 'name'] },
+                  { title: 'Đơn vị', dataIndex: ['ingredient', 'unit'] },
+                  { title: 'Số lượng', dataIndex: 'quantity', render: (v: number) => Number(v).toLocaleString() },
+                  { title: 'Đơn giá', dataIndex: 'unitPrice', render: (v: number) => formatCurrency(v) },
+                  { title: 'Thành tiền', dataIndex: 'subtotal', render: (v: number) => formatCurrency(v) },
+                ]}
+              />
+            )}
           </>
         )}
       </Modal>

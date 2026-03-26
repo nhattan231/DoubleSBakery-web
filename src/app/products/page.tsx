@@ -21,6 +21,7 @@ import {
   Tabs,
   Steps,
   Collapse,
+  Spin,
 } from 'antd';
 import {
   PlusOutlined,
@@ -50,12 +51,22 @@ export default function ProductsPage() {
   const [imageUrl, setImageUrl] = useState<string>('');
   const [imageList, setImageList] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm();
   const [recipeForm] = Form.useForm();
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
   const [showGuide, setShowGuide] = useState(false);
   const [detailProduct, setDetailProduct] = useState<any>(null);
   const [copiedFromSize, setCopiedFromSize] = useState<string | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    setIsMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   const fetchProducts = async (page = 1) => {
     setLoading(true);
@@ -124,6 +135,7 @@ export default function ProductsPage() {
   };
 
   const handleSubmit = async (values: any) => {
+    setSubmitting(true);
     try {
       if (editingProduct) {
         await productsApi.update(editingProduct.id, values);
@@ -140,6 +152,8 @@ export default function ProductsPage() {
       fetchProducts(pagination.current);
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Có lỗi xảy ra');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -155,7 +169,14 @@ export default function ProductsPage() {
 
   const openEdit = (product: Product) => {
     setEditingProduct(product);
-    form.setFieldsValue(product);
+    // Giữ id (để TypeORM update đúng) + loại bỏ productId/createdAt/updatedAt (DTO không cho phép)
+    const cleanSizes = (product as any).sizes?.map((s: any) => ({
+      id: s.id,
+      name: s.name,
+      price: s.price,
+      sortOrder: s.sortOrder,
+    })) || [];
+    form.setFieldsValue({ ...product, sizes: cleanSizes });
     setImageUrl(product.imageUrl || '');
     setImageList((product as any).images || []);
     setModalOpen(true);
@@ -230,6 +251,7 @@ export default function ProductsPage() {
 
   const handleRecipeSubmit = async (values: any) => {
     if (!selectedProduct) return;
+    setSubmitting(true);
     const sizeId = activeRecipeTab === 'default' ? null : activeRecipeTab;
     const existingRecipe = productRecipes.find((r: any) =>
       sizeId ? r.sizeId === sizeId : !r.sizeId,
@@ -253,6 +275,8 @@ export default function ProductsPage() {
       fetchProducts(pagination.current);
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Có lỗi xảy ra');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -344,8 +368,8 @@ export default function ProductsPage() {
       title: 'Công thức',
       key: 'recipe',
       render: (_: any, record: Product) => (
-        <Tag color={record.recipe ? 'blue' : 'default'}>
-          {record.recipe ? 'Có' : 'Chưa có'}
+        <Tag color={(record as any).recipes?.length > 0 ? 'blue' : 'default'}>
+          {(record as any).recipes?.length > 0 ? 'Có' : 'Chưa có'}
         </Tag>
       ),
     },
@@ -368,7 +392,7 @@ export default function ProductsPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
         <Title level={3} style={{ margin: 0 }}>Quản lý sản phẩm</Title>
         <Space>
           <Button
@@ -442,11 +466,70 @@ export default function ProductsPage() {
         </Card>
       )}
 
-      <Card>
-        <Table columns={columns} dataSource={products} rowKey="id" loading={loading}
-          pagination={{ current: pagination.current, pageSize: pagination.pageSize, total: pagination.total, onChange: (page) => fetchProducts(page) }}
-        />
-      </Card>
+      {isMobile ? (
+        <Spin spinning={loading}>
+          <div style={{ padding: '0 2px' }}>
+            {products.map((product) => (
+              <div key={product.id} style={{ background: '#fff', border: '1px solid #f0f0f0', borderRadius: 10, padding: '12px 14px', marginBottom: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+                {/* Row 1: Image + Name + Status */}
+                <div style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
+                  {product.imageUrl ? (
+                    <img src={getFullImageUrl(product.imageUrl)} alt={product.name} width={48} height={48} style={{ borderRadius: 6, objectFit: 'cover', flexShrink: 0 }} onClick={() => setDetailProduct(product)} />
+                  ) : (
+                    <div style={{ width: 48, height: 48, borderRadius: 6, background: '#f5f5f5', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ccc', fontSize: 11 }} onClick={() => setDetailProduct(product)}>N/A</div>
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <strong style={{ color: '#8B6914', fontSize: 14 }}>{product.name}</strong>
+                      <Tag color={product.status === 'active' ? 'green' : 'red'} style={{ margin: 0, fontSize: 11 }}>
+                        {product.status === 'active' ? 'Đang bán' : 'Ngừng bán'}
+                      </Tag>
+                    </div>
+                    {product.description && <div style={{ fontSize: 12, color: '#999', marginTop: 2 }}>{product.description}</div>}
+                  </div>
+                </div>
+                {/* Row 2: Price + Sizes */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <strong style={{ fontSize: 15, color: '#333' }}>{formatCurrency(product.price)}</strong>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {(product as any).sizes?.length > 0
+                      ? (product as any).sizes.map((s: any) => <Tag key={s.id} color="purple" style={{ margin: 0, fontSize: 11 }}>{s.name}</Tag>)
+                      : <Tag style={{ margin: 0, fontSize: 11 }}>Mặc định</Tag>
+                    }
+                  </div>
+                </div>
+                {/* Row 3: Recipe tag + Buttons */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Tag color={(product as any).recipes?.length > 0 ? 'blue' : 'default'} style={{ margin: 0 }}>{(product as any).recipes?.length > 0 ? 'Có CT' : 'Chưa có CT'}</Tag>
+                  <Space size={4}>
+                    <Button size="small" icon={<ExperimentOutlined />} onClick={() => openRecipe(product)}>CT</Button>
+                    <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(product)} />
+                    <Popconfirm title="Xác nhận xoá?" onConfirm={() => handleDelete(product.id)}>
+                      <Button size="small" danger icon={<DeleteOutlined />} />
+                    </Popconfirm>
+                  </Space>
+                </div>
+              </div>
+            ))}
+            {pagination.total > pagination.pageSize && (
+              <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                <Space>
+                  <Button size="small" disabled={pagination.current <= 1} onClick={() => fetchProducts(pagination.current - 1)}>Trước</Button>
+                  <span style={{ fontSize: 13, color: '#666' }}>Trang {pagination.current} / {Math.ceil(pagination.total / pagination.pageSize)}</span>
+                  <Button size="small" disabled={pagination.current >= Math.ceil(pagination.total / pagination.pageSize)} onClick={() => fetchProducts(pagination.current + 1)}>Sau</Button>
+                </Space>
+              </div>
+            )}
+          </div>
+        </Spin>
+      ) : (
+        <Card>
+          <Table columns={columns} dataSource={products} rowKey="id" loading={loading}
+            scroll={{ x: 800 }}
+            pagination={{ current: pagination.current, pageSize: pagination.pageSize, total: pagination.total, onChange: (page) => fetchProducts(page) }}
+          />
+        </Card>
+      )}
 
       {/* Modal tạo/sửa sản phẩm */}
       <Modal
@@ -454,6 +537,8 @@ export default function ProductsPage() {
         open={modalOpen}
         onCancel={() => { setModalOpen(false); setEditingProduct(null); form.resetFields(); setImageUrl(''); setImageList([]); }}
         onOk={() => form.submit()}
+        okButtonProps={{ loading: submitting }}
+        cancelButtonProps={{ disabled: submitting }}
         width={650}
       >
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
@@ -537,18 +622,24 @@ export default function ProductsPage() {
             {(fields, { add, remove }) => (
               <>
                 {fields.map(({ key, name, ...rest }) => (
-                  <Space key={key} style={{ display: 'flex', marginBottom: 8 }} align="start">
-                    <Form.Item {...rest} name={[name, 'name']} rules={[{ required: true, message: 'Tên size' }]}>
-                      <Input placeholder="VD: S, M, L" style={{ width: 100 }} />
+                  <div key={key} className="size-card" style={{
+                    display: 'grid',
+                    gridTemplateColumns: '100px 150px 80px auto',
+                    gap: 8,
+                    alignItems: 'start',
+                    marginBottom: 8,
+                  }}>
+                    <Form.Item {...rest} name={[name, 'name']} rules={[{ required: true, message: 'Tên size' }]} style={{ marginBottom: 0 }}>
+                      <Input placeholder="VD: S, M, L" />
                     </Form.Item>
-                    <Form.Item {...rest} name={[name, 'price']} rules={[{ required: true, message: 'Giá' }]}>
-                      <InputNumber placeholder="Giá (VNĐ)" min={0} step={1000} style={{ width: 150 }} />
+                    <Form.Item {...rest} name={[name, 'price']} rules={[{ required: true, message: 'Giá' }]} style={{ marginBottom: 0 }}>
+                      <InputNumber placeholder="Giá (VNĐ)" min={0} step={1000} style={{ width: '100%' }} />
                     </Form.Item>
-                    <Form.Item {...rest} name={[name, 'sortOrder']} initialValue={0}>
-                      <InputNumber placeholder="Thứ tự" min={0} style={{ width: 80 }} />
+                    <Form.Item {...rest} name={[name, 'sortOrder']} initialValue={0} style={{ marginBottom: 0 }}>
+                      <InputNumber placeholder="TT" min={0} style={{ width: '100%' }} />
                     </Form.Item>
-                    <Button danger onClick={() => remove(name)}>Xoá</Button>
-                  </Space>
+                    <Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(name)} style={{ height: 32 }} />
+                  </div>
                 ))}
                 <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
                   Thêm size
@@ -566,6 +657,8 @@ export default function ProductsPage() {
         onCancel={() => { setRecipeModalOpen(false); recipeForm.resetFields(); }}
         onOk={() => recipeForm.submit()}
         okText="Lưu công thức"
+        okButtonProps={{ loading: submitting }}
+        cancelButtonProps={{ disabled: submitting }}
         width={750}
       >
         {/* Tabs: Mặc định + từng size */}
@@ -586,16 +679,18 @@ export default function ProductsPage() {
           />
         )}
 
-        <div style={{ marginBottom: 12, padding: '8px 12px', background: '#f6f6f6', borderRadius: 6, fontSize: 12, color: '#666' }}>
-          {activeRecipeTab === 'default'
-            ? selectedProduct?.sizes?.length
-              ? '📋 Công thức mặc định — dùng khi size không có công thức riêng'
-              : '📋 Định lượng nguyên liệu cho 1 sản phẩm'
-            : `📋 Định lượng riêng cho size "${selectedProduct?.sizes?.find((s: any) => s.id === activeRecipeTab)?.name || ''}"`
-          }
+        <div style={{ marginBottom: 12, padding: '8px 12px', background: '#f6f6f6', borderRadius: 6, fontSize: 12, color: '#666', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+          <span>
+            {activeRecipeTab === 'default'
+              ? selectedProduct?.sizes?.length
+                ? '📋 CT mặc định'
+                : '📋 Định lượng / 1 SP'
+              : `📋 Size "${selectedProduct?.sizes?.find((s: any) => s.id === activeRecipeTab)?.name || ''}"`
+            }
+          </span>
           {productRecipes.find((r: any) => activeRecipeTab === 'default' ? !r.sizeId : r.sizeId === activeRecipeTab)
-            ? <Tag color="green" style={{ marginLeft: 8 }}>Đã có</Tag>
-            : <Tag color="orange" style={{ marginLeft: 8 }}>Chưa có</Tag>
+            ? <Tag color="green" style={{ margin: 0 }}>Đã có</Tag>
+            : <Tag color="orange" style={{ margin: 0 }}>Chưa có</Tag>
           }
         </div>
 
@@ -619,51 +714,69 @@ export default function ProductsPage() {
             {(fields, { add, remove }) => (
               <>
                 {fields.map(({ key, name, ...restField }) => (
-                  <Space key={key} style={{ display: 'flex', marginBottom: 8 }} align="start">
-                    <Form.Item shouldUpdate={(prev, cur) => prev.items !== cur.items} noStyle>
-                      {() => {
-                        const allItems = recipeForm.getFieldValue('items') || [];
-                        const selectedIds = allItems
-                          .filter((_: any, idx: number) => idx !== name)
-                          .map((item: any) => item?.ingredientId)
-                          .filter(Boolean);
-                        return (
-                          <Form.Item {...restField} name={[name, 'ingredientId']} rules={[{ required: true, message: 'Chọn nguyên liệu' }]}>
-                            <Select placeholder="Chọn nguyên liệu" style={{ width: 340 }} showSearch optionFilterProp="label"
-                              options={ingredients
-                                .filter((ing) => !selectedIds.includes(ing.id))
-                                .map((ing) => ({ value: ing.id, label: `${ing.name} (${ing.unit})`, imageUrl: ing.imageUrl }))}
-                              optionRender={(option) => (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                  {(option.data as any).imageUrl ? (
-                                    <img src={getFullImageUrl((option.data as any).imageUrl)} alt="" width={24} height={24} style={{ borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
-                                  ) : (
-                                    <div style={{ width: 24, height: 24, borderRadius: 4, background: '#f0f0f0', flexShrink: 0 }} />
-                                  )}
-                                  <span>{option.label}</span>
-                                </div>
-                              )}
-                              labelRender={(props) => {
-                                const ing = ingredients.find((i) => i.id === props.value);
-                                return (
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                    {ing?.imageUrl ? (
-                                      <img src={getFullImageUrl(ing.imageUrl)} alt="" width={20} height={20} style={{ borderRadius: 3, objectFit: 'cover', flexShrink: 0 }} />
-                                    ) : null}
-                                    <span>{props.label}</span>
+                  <div key={key} className="recipe-ingredient-card" style={{
+                    marginBottom: 8,
+                    background: '#fafafa',
+                    border: '1px solid #f0f0f0',
+                    borderRadius: 8,
+                    padding: '10px 12px',
+                  }}>
+                    {/* Row 1: Select + Delete button */}
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'start', marginBottom: 8 }}>
+                      <div style={{ flex: 1 }}>
+                        <Form.Item shouldUpdate={(prev, cur) => prev.items !== cur.items} noStyle>
+                        {() => {
+                          const allItems = recipeForm.getFieldValue('items') || [];
+                          const selectedIds = allItems
+                            .filter((_: any, idx: number) => idx !== name)
+                            .map((item: any) => item?.ingredientId)
+                            .filter(Boolean);
+                          return (
+                            <Form.Item {...restField} name={[name, 'ingredientId']} rules={[{ required: true, message: 'Chọn nguyên liệu' }]} style={{ marginBottom: 8 }}>
+                              <Select placeholder="Chọn nguyên liệu" style={{ width: '100%' }} showSearch optionFilterProp="label"
+                                options={ingredients
+                                  .filter((ing) => !selectedIds.includes(ing.id))
+                                  .map((ing) => ({ value: ing.id, label: `${ing.name} (${ing.unit})`, imageUrl: ing.imageUrl }))}
+                                optionRender={(option) => (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    {(option.data as any).imageUrl ? (
+                                      <img src={getFullImageUrl((option.data as any).imageUrl)} alt="" width={24} height={24} style={{ borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
+                                    ) : (
+                                      <div style={{ width: 24, height: 24, borderRadius: 4, background: '#f0f0f0', flexShrink: 0 }} />
+                                    )}
+                                    <span>{option.label}</span>
                                   </div>
-                                );
-                              }}
-                            />
-                          </Form.Item>
-                        );
-                      }}
+                                )}
+                                labelRender={(props) => {
+                                  const ing = ingredients.find((i) => i.id === props.value);
+                                  return (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                      {ing?.imageUrl ? (
+                                        <img src={getFullImageUrl(ing.imageUrl)} alt="" width={20} height={20} style={{ borderRadius: 3, objectFit: 'cover', flexShrink: 0 }} />
+                                      ) : null}
+                                      <span>{props.label}</span>
+                                    </div>
+                                  );
+                                }}
+                              />
+                            </Form.Item>
+                          );
+                        }}
+                      </Form.Item>
+                      </div>
+                      <Button
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={() => remove(name)}
+                        size="small"
+                        style={{ flexShrink: 0, marginTop: 4 }}
+                      />
+                    </div>
+                    {/* Row 2: Quantity */}
+                    <Form.Item {...restField} name={[name, 'quantity']} rules={[{ required: true, message: 'Nhập số lượng' }]} label="Số lượng" style={{ marginBottom: 0 }}>
+                      <InputNumber placeholder="Số lượng" min={0.001} style={{ width: '100%' }} />
                     </Form.Item>
-                    <Form.Item {...restField} name={[name, 'quantity']} rules={[{ required: true, message: 'Nhập số lượng' }]}>
-                      <InputNumber placeholder="Số lượng" min={0.001} style={{ width: 150 }} />
-                    </Form.Item>
-                    <Button danger onClick={() => remove(name)}>Xoá</Button>
-                  </Space>
+                  </div>
                 ))}
                 <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
                   Thêm nguyên liệu
@@ -734,7 +847,7 @@ export default function ProductsPage() {
 
               {/* Thông tin sản phẩm */}
               <Divider style={{ margin: '8px 0 12px' }} />
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 24px', fontSize: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '8px 24px', fontSize: 14 }}>
                 <div><span style={{ color: '#888' }}>Giá mặc định:</span> <strong>{formatCurrency(detailProduct.price)}</strong></div>
                 <div>
                   <span style={{ color: '#888' }}>Trạng thái:</span>{' '}
