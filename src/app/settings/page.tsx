@@ -202,7 +202,8 @@ export default function SettingsPage() {
   // ===== Opening Hours =====
   const handleHoursChange = async (day: string, field: string, value: any) => {
     if (!settings) return;
-    const hours = { ...settings.openingHours, [day]: { ...settings.openingHours[day as keyof typeof settings.openingHours], [field]: value } };
+    const currentHours = settings.openingHours || {} as any;
+    const hours = { ...currentHours, [day]: { ...currentHours[day as keyof typeof currentHours], [field]: value } };
     await saveSettings({ openingHours: hours });
   };
 
