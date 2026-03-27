@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useProductsQuery, useAllIngredientsQuery } from '@/lib/hooks';
 import {
   Card,
   Table,
@@ -31,17 +33,23 @@ import {
   UploadOutlined,
   QuestionCircleOutlined,
 } from '@ant-design/icons';
-import { productsApi, recipesApi, ingredientsApi, uploadApi } from '@/lib/api';
+import { productsApi, recipesApi, uploadApi } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
-import type { Product, Ingredient } from '@/types';
+import type { Product } from '@/types';
 
 const { Title } = Typography;
 const API_BASE = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:2316';
 
+// Clear menu cache when products change so public menu shows fresh data
+const clearMenuCache = () => {
+  try {
+    localStorage.removeItem('menu_cache_settings');
+    localStorage.removeItem('menu_cache_menu');
+  } catch {}
+};
+
 export default function ProductsPage() {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
-  const [loading, setLoading] = useState(false);
+  const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
   const [recipeModalOpen, setRecipeModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -55,6 +63,10 @@ export default function ProductsPage() {
   const [form] = Form.useForm();
   const [recipeForm] = Form.useForm();
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
+  const productsQuery = useProductsQuery({ page: pagination.current, limit: pagination.pageSize });
+  const products: Product[] = productsQuery.data?.list || [];
+  const loading = productsQuery.isLoading;
+  const { data: ingredients = [] } = useAllIngredientsQuery();
   const [showGuide, setShowGuide] = useState(false);
   const [detailProduct, setDetailProduct] = useState<any>(null);
   const [copiedFromSize, setCopiedFromSize] = useState<string | null>(null);
@@ -68,30 +80,11 @@ export default function ProductsPage() {
     return () => mq.removeEventListener('change', handler);
   }, []);
 
-  const fetchProducts = async (page = 1) => {
-    setLoading(true);
-    try {
-      const res = await productsApi.getAll({ page, limit: pagination.pageSize });
-      setProducts(res.data.list || []);
-      setPagination((prev) => ({ ...prev, current: page, total: res.data.pagination?.total || 0 }));
-    } catch {
-      message.error('Không thể tải danh sách sản phẩm');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchIngredients = async () => {
-    try {
-      const res = await ingredientsApi.getAll({ limit: 100 });
-      setIngredients(res.data.list || []);
-    } catch {}
-  };
-
   useEffect(() => {
-    // Load song song để tăng tốc
-    Promise.all([fetchProducts(), fetchIngredients()]);
-  }, []);
+    if (productsQuery.data?.pagination?.total !== undefined) {
+      setPagination(prev => ({ ...prev, total: productsQuery.data?.pagination?.total || 0 }));
+    }
+  }, [productsQuery.data?.pagination?.total]);
 
   const handleUpload = async (file: File) => {
     setUploading(true);
@@ -149,7 +142,8 @@ export default function ProductsPage() {
       setEditingProduct(null);
       setImageUrl('');
       setImageList([]);
-      fetchProducts(pagination.current);
+      clearMenuCache();
+      queryClient.invalidateQueries({ queryKey: ['products'] });
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Có lỗi xảy ra');
     } finally {
@@ -161,7 +155,8 @@ export default function ProductsPage() {
     try {
       await productsApi.delete(id);
       message.success('Xoá sản phẩm thành công');
-      fetchProducts(pagination.current);
+      clearMenuCache();
+      queryClient.invalidateQueries({ queryKey: ['products'] });
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Không thể xoá');
     }
@@ -272,7 +267,8 @@ export default function ProductsPage() {
       // Reload recipes theo product
       const res = await recipesApi.getByProduct(selectedProduct.id);
       setProductRecipes(res.data.list || []);
-      fetchProducts(pagination.current);
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['recipes'] });
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Có lỗi xảy ra');
     } finally {
@@ -514,9 +510,9 @@ export default function ProductsPage() {
             {pagination.total > pagination.pageSize && (
               <div style={{ textAlign: 'center', padding: '12px 0' }}>
                 <Space>
-                  <Button size="small" disabled={pagination.current <= 1} onClick={() => fetchProducts(pagination.current - 1)}>Trước</Button>
+                  <Button size="small" disabled={pagination.current <= 1} onClick={() => setPagination(prev => ({ ...prev, current: prev.current - 1 }))}>Trước</Button>
                   <span style={{ fontSize: 13, color: '#666' }}>Trang {pagination.current} / {Math.ceil(pagination.total / pagination.pageSize)}</span>
-                  <Button size="small" disabled={pagination.current >= Math.ceil(pagination.total / pagination.pageSize)} onClick={() => fetchProducts(pagination.current + 1)}>Sau</Button>
+                  <Button size="small" disabled={pagination.current >= Math.ceil(pagination.total / pagination.pageSize)} onClick={() => setPagination(prev => ({ ...prev, current: prev.current + 1 }))}>Sau</Button>
                 </Space>
               </div>
             )}
@@ -526,7 +522,7 @@ export default function ProductsPage() {
         <Card>
           <Table columns={columns} dataSource={products} rowKey="id" loading={loading}
             scroll={{ x: 800 }}
-            pagination={{ current: pagination.current, pageSize: pagination.pageSize, total: pagination.total, onChange: (page) => fetchProducts(page) }}
+            pagination={{ current: pagination.current, pageSize: pagination.pageSize, total: pagination.total, onChange: (page) => setPagination(prev => ({ ...prev, current: page })) }}
           />
         </Card>
       )}

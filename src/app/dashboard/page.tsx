@@ -8,18 +8,20 @@ import {
   AlertOutlined,
   RiseOutlined,
 } from '@ant-design/icons';
-import { reportsApi, ordersApi, ingredientsApi } from '@/lib/api';
 import { formatCurrency, formatDateTime, orderStatusMap } from '@/lib/format';
 import type { DashboardData, Order, Ingredient } from '@/types';
+import { useDashboardQuery, useRecentOrdersQuery, useLowStockQuery } from '@/lib/hooks';
 
 const { Title } = Typography;
 
 export default function DashboardPage() {
-  const [loading, setLoading] = useState(true);
-  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
-  const [recentOrders, setRecentOrders] = useState<Order[]>([]);
-  const [lowStockIngredients, setLowStockIngredients] = useState<Ingredient[]>([]);
   const [isMobile, setIsMobile] = useState(false);
+
+  const { data: dashboardData, isLoading: dashboardLoading } = useDashboardQuery();
+  const { data: recentOrders = [], isLoading: ordersLoading } = useRecentOrdersQuery();
+  const { data: lowStockIngredients = [], isLoading: lowStockLoading } = useLowStockQuery();
+
+  const loading = dashboardLoading || ordersLoading || lowStockLoading;
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 768px)');
@@ -27,29 +29,6 @@ export default function DashboardPage() {
     const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
-  }, []);
-
-  useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      try {
-        const [dashboardRes, ordersRes, lowStockRes] = await Promise.all([
-          reportsApi.dashboard(),
-          ordersApi.getAll({ limit: 5 }),
-          ingredientsApi.getLowStock(),
-        ]);
-
-        setDashboardData(dashboardRes.data.data);
-        setRecentOrders(ordersRes.data.list || []);
-        setLowStockIngredients(lowStockRes.data.list || []);
-      } catch (error) {
-        console.error('Failed to fetch dashboard data:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
   }, []);
 
   const orderColumns = [
@@ -114,7 +93,7 @@ export default function DashboardPage() {
     },
   ];
 
-  if (loading) {
+  if (loading && !dashboardData) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
         <Spin size="large" />
@@ -177,7 +156,7 @@ export default function DashboardPage() {
               recentOrders.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: 24, color: '#999' }}>Chưa có đơn hàng</div>
               ) : (
-                recentOrders.map((order) => {
+                recentOrders.map((order: Order) => {
                   const s = orderStatusMap[order.status] || { label: order.status, color: 'default' };
                   return (
                     <div key={order.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #f5f5f5' }}>
@@ -211,7 +190,7 @@ export default function DashboardPage() {
               lowStockIngredients.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: 24, color: '#999' }}>Tất cả đều đủ</div>
               ) : (
-                lowStockIngredients.map((item) => (
+                lowStockIngredients.map((item: Ingredient) => (
                   <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #f5f5f5' }}>
                     <div>
                       <div style={{ fontSize: 13, fontWeight: 500 }}>{item.name}</div>

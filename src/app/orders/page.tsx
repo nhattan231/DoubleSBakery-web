@@ -1,6 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useOrdersQuery, useActiveProductsQuery } from '@/lib/hooks';
 import {
   Card,
   Table,
@@ -35,7 +37,7 @@ import {
   WarningOutlined,
   ExperimentOutlined,
 } from '@ant-design/icons';
-import { ordersApi, productsApi, productionApi } from '@/lib/api';
+import { ordersApi, productionApi } from '@/lib/api';
 import { formatCurrency, formatDateTime, orderStatusMap } from '@/lib/format';
 import type { Order, Product, EstimateHistoryItem } from '@/types';
 import dayjs from 'dayjs';
@@ -72,9 +74,8 @@ function getItemPrice(product: Product | undefined, sizeId?: string): number {
 }
 
 export default function OrdersPage() {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(false);
+  const queryClient = useQueryClient();
+  const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -84,10 +85,27 @@ export default function OrdersPage() {
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
   const [searchText, setSearchText] = useState('');
   const [form] = Form.useForm();
-  const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
   const [submitting, setSubmitting] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  const ordersQuery = useOrdersQuery({
+    page,
+    limit: 20,
+    status: statusFilter,
+    startDate: dateRange ? dateRange[0].format('YYYY-MM-DD') : undefined,
+    endDate: dateRange ? dateRange[1].format('YYYY-MM-DD') : undefined,
+    search: searchText.trim() || undefined,
+  });
+  const orders: Order[] = ordersQuery.data?.list || [];
+  const loading = ordersQuery.isLoading;
+  const paginationTotal = ordersQuery.data?.pagination?.total || 0;
+  const { data: products = [] } = useActiveProductsQuery();
+
+  // Reset page to 1 when filters change
+  useEffect(() => {
+    setPage(1);
+  }, [statusFilter, dateRange, searchText]);
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 768px)');
@@ -95,42 +113,6 @@ export default function OrdersPage() {
     const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
-  }, []);
-
-  const fetchOrders = useCallback(async (page = 1) => {
-    setLoading(true);
-    try {
-      const params: any = { page, limit: 20, status: statusFilter };
-      if (dateRange) {
-        params.startDate = dateRange[0].format('YYYY-MM-DD');
-        params.endDate = dateRange[1].format('YYYY-MM-DD');
-      }
-      if (searchText.trim()) {
-        params.search = searchText.trim();
-      }
-      const res = await ordersApi.getAll(params);
-      setOrders(res.data.list || []);
-      setPagination((prev) => ({ ...prev, current: page, total: res.data.pagination?.total || 0 }));
-    } catch {
-      message.error('Không thể tải danh sách đơn hàng');
-    } finally {
-      setLoading(false);
-    }
-  }, [statusFilter, dateRange, searchText]);
-
-  const fetchProducts = async () => {
-    try {
-      const res = await productsApi.getAll({ limit: 100, status: 'active' });
-      setProducts(res.data.list || []);
-    } catch {}
-  };
-
-  useEffect(() => {
-    fetchOrders();
-  }, [fetchOrders]);
-
-  useEffect(() => {
-    fetchProducts();
   }, []);
 
   const handlePresetChange = (preset: DatePreset) => {
@@ -189,7 +171,7 @@ export default function OrdersPage() {
       message.success('Tạo đơn hàng thành công');
       setModalOpen(false);
       form.resetFields();
-      fetchOrders(pagination.current);
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Có lỗi xảy ra');
     } finally {
@@ -201,7 +183,7 @@ export default function OrdersPage() {
     try {
       await ordersApi.updateStatus(orderId, newStatus);
       message.success(`Cập nhật trạng thái thành công`);
-      fetchOrders(pagination.current);
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
       if (selectedOrder?.id === orderId) {
         const res = await ordersApi.getOne(orderId);
         setSelectedOrder(res.data.data);
@@ -405,7 +387,7 @@ export default function OrdersPage() {
             style={{ width: 220, minWidth: 160, flex: '1 1 160px' }}
           />
 
-          <Button icon={<ReloadOutlined />} onClick={() => fetchOrders()}>
+          <Button icon={<ReloadOutlined />} onClick={() => ordersQuery.refetch()}>
             Tải lại
           </Button>
         </div>
@@ -470,12 +452,12 @@ export default function OrdersPage() {
                   );
                 })}
                 {/* Pagination */}
-                {pagination.total > pagination.pageSize && (
+                {paginationTotal > 20 && (
                   <div style={{ textAlign: 'center', padding: '12px 0' }}>
                     <Space>
-                      <Button size="small" disabled={pagination.current <= 1} onClick={() => fetchOrders(pagination.current - 1)}>Trước</Button>
-                      <span style={{ fontSize: 13, color: '#666' }}>Trang {pagination.current} / {Math.ceil(pagination.total / pagination.pageSize)}</span>
-                      <Button size="small" disabled={pagination.current >= Math.ceil(pagination.total / pagination.pageSize)} onClick={() => fetchOrders(pagination.current + 1)}>Sau</Button>
+                      <Button size="small" disabled={page <= 1} onClick={() => setPage(page - 1)}>Trước</Button>
+                      <span style={{ fontSize: 13, color: '#666' }}>Trang {page} / {Math.ceil(paginationTotal / 20)}</span>
+                      <Button size="small" disabled={page >= Math.ceil(paginationTotal / 20)} onClick={() => setPage(page + 1)}>Sau</Button>
                     </Space>
                   </div>
                 )}
@@ -491,10 +473,10 @@ export default function OrdersPage() {
             loading={loading}
             scroll={{ x: 800 }}
             pagination={{
-              current: pagination.current,
-              pageSize: pagination.pageSize,
-              total: pagination.total,
-              onChange: (page) => fetchOrders(page),
+              current: page,
+              pageSize: 20,
+              total: paginationTotal,
+              onChange: (p) => setPage(p),
             }}
           />
         )}

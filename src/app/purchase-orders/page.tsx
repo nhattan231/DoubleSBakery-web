@@ -47,7 +47,9 @@ import {
   ClearOutlined,
   CalendarOutlined,
 } from '@ant-design/icons';
-import { purchaseOrdersApi, ingredientsApi, suppliersApi, uploadApi } from '@/lib/api';
+import { useQueryClient } from '@tanstack/react-query';
+import { purchaseOrdersApi, ingredientsApi, uploadApi } from '@/lib/api';
+import { usePurchaseOrdersQuery, useAllIngredientsQuery, useActiveSuppliersQuery } from '@/lib/hooks';
 import { formatCurrency, formatDateTime, formatDate, poStatusMap } from '@/lib/format';
 import type { PurchaseOrder, Ingredient, Supplier } from '@/types';
 
@@ -296,10 +298,7 @@ function IngredientRow({
 // Main page component
 // ============================================================
 export default function PurchaseOrdersPage() {
-  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
-  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [loading, setLoading] = useState(false);
+  const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null);
@@ -330,36 +329,19 @@ export default function PurchaseOrdersPage() {
   const [drawerUploading, setDrawerUploading] = useState(false);
   const [drawerSubmitting, setDrawerSubmitting] = useState(false);
 
-  // ========== Fetch data ==========
-  const fetchPOs = useCallback(async (page = 1) => {
-    setLoading(true);
-    try {
-      const res = await purchaseOrdersApi.getAll({ page, limit: pagination.pageSize });
-      setPurchaseOrders(res.data.list || []);
-      setPagination((prev) => ({ ...prev, current: page, total: res.data.pagination?.total || 0 }));
-    } catch {
-      message.error('Không thể tải danh sách phiếu nhập');
-    } finally {
-      setLoading(false);
-    }
-  }, [pagination.pageSize]);
+  // ========== React Query data ==========
+  const posQuery = usePurchaseOrdersQuery({ page: pagination.current, limit: pagination.pageSize });
+  const purchaseOrders: PurchaseOrder[] = posQuery.data?.list || [];
+  const loading = posQuery.isLoading;
+  const { data: ingredients = [] } = useAllIngredientsQuery();
+  const { data: suppliers = [] } = useActiveSuppliersQuery();
 
-  const fetchIngredients = useCallback(async () => {
-    try {
-      const res = await ingredientsApi.getAll({ limit: 100 });
-      setIngredients(res.data.list || []);
-    } catch {
-      // silent - sẽ hiện dropdown trống
-    }
-  }, []);
-
+  // Update pagination total when posQuery data changes
   useEffect(() => {
-    fetchPOs();
-    fetchIngredients();
-    suppliersApi.getAll({ activeOnly: true }).then((res) => {
-      setSuppliers(res.data.list || []);
-    }).catch(() => {});
-  }, []);
+    if (posQuery.data?.pagination?.total !== undefined) {
+      setPagination((prev) => ({ ...prev, total: posQuery.data?.pagination?.total || 0 }));
+    }
+  }, [posQuery.data?.pagination?.total]);
 
   // Khôi phục draft nếu có
   useEffect(() => {
@@ -514,48 +496,49 @@ export default function PurchaseOrdersPage() {
       form.resetFields();
       setSelectedIngredientMap({});
       sessionStorage.removeItem(DRAFT_STORAGE_KEY);
-      fetchPOs(pagination.current);
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Có lỗi xảy ra');
     } finally {
       setSubmitting(false);
     }
-  }, [form, fetchPOs, pagination.current]);
+  }, [form, queryClient]);
 
   // draft → confirmed: chỉ xác nhận đơn, CHƯA nhập kho
   const handleConfirm = useCallback(async (id: string) => {
     try {
       await purchaseOrdersApi.updateStatus(id, 'confirmed');
       message.success('Đã xác nhận đơn hàng — chờ nhận hàng từ nhà cung cấp');
-      fetchPOs(pagination.current);
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Có lỗi xảy ra');
     }
-  }, [fetchPOs, pagination.current]);
+  }, [queryClient]);
 
   // confirmed → received: nhận hàng + CỘNG TỒN KHO
   const handleReceived = useCallback(async (id: string) => {
     try {
       await purchaseOrdersApi.updateStatus(id, 'received');
       message.success('Nhận hàng thành công — tồn kho đã được cộng!');
-      fetchPOs(pagination.current);
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
       // Refresh ingredients để cập nhật tồn kho mới trong dropdown
-      fetchIngredients();
+      queryClient.invalidateQueries({ queryKey: ['ingredients'] });
+      queryClient.invalidateQueries({ queryKey: ['lowStock'] });
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Có lỗi xảy ra');
     }
-  }, [fetchPOs, fetchIngredients, pagination.current]);
+  }, [queryClient]);
 
   // draft | confirmed → cancelled: huỷ phiếu (chưa nhận hàng nên không ảnh hưởng tồn kho)
   const handleCancel = useCallback(async (id: string) => {
     try {
       await purchaseOrdersApi.updateStatus(id, 'cancelled');
       message.success('Đã huỷ phiếu nhập');
-      fetchPOs(pagination.current);
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Có lỗi xảy ra');
     }
-  }, [fetchPOs, pagination.current]);
+  }, [queryClient]);
 
   const viewDetail = useCallback(async (po: PurchaseOrder) => {
     try {
@@ -607,7 +590,7 @@ export default function PurchaseOrdersPage() {
   // ========== Restore draft ==========
   const handleRestore = useCallback(async () => {
     // Refresh danh sách NL mới nhất trước khi restore
-    await fetchIngredients();
+    await queryClient.invalidateQueries({ queryKey: ['ingredients'] });
 
     try {
       const saved = sessionStorage.getItem(DRAFT_STORAGE_KEY);
@@ -629,7 +612,7 @@ export default function PurchaseOrdersPage() {
     // Fallback: mở modal trống
     setModalOpen(true);
     setMinimized(false);
-  }, [form, fetchIngredients]);
+  }, [form, queryClient]);
 
   // ========== Đóng modal ==========
   const handleCloseModal = useCallback(() => {
@@ -709,7 +692,7 @@ export default function PurchaseOrdersPage() {
       message.success(`Đã tạo nguyên liệu "${values.name}" thành công`);
 
       // Refresh danh sách ingredients
-      await fetchIngredients();
+      await queryClient.invalidateQueries({ queryKey: ['ingredients'] });
 
       // Đóng drawer
       setDrawerOpen(false);
@@ -721,7 +704,7 @@ export default function PurchaseOrdersPage() {
     } finally {
       setDrawerSubmitting(false);
     }
-  }, [drawerForm, fetchIngredients]);
+  }, [drawerForm, queryClient]);
 
   const handleOpenDrawer = useCallback(() => {
     drawerForm.resetFields();

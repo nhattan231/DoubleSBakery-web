@@ -31,9 +31,29 @@ export default function LoginPage() {
       // tránh race condition với AppLayout auth check
       window.location.href = '/dashboard';
     } catch (err: any) {
-      message.error(
-        err.response?.data?.message || err.message || 'Đăng nhập thất bại',
-      );
+      let errorMessage = 'Đăng nhập thất bại. Vui lòng thử lại.';
+
+      if (err.response) {
+        // Server trả về lỗi
+        const status = err.response.status;
+        if (status === 401) {
+          errorMessage = 'Email hoặc mật khẩu không đúng. Vui lòng kiểm tra lại.';
+        } else if (status === 403) {
+          errorMessage = 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.';
+        } else if (status === 429) {
+          errorMessage = 'Bạn đã thử đăng nhập quá nhiều lần. Vui lòng thử lại sau.';
+        } else if (status >= 500) {
+          errorMessage = 'Hệ thống đang gặp sự cố. Vui lòng thử lại sau ít phút.';
+        } else {
+          errorMessage = err.response.data?.message || errorMessage;
+        }
+      } else if (err.code === 'ERR_NETWORK' || err.message === 'Network Error') {
+        errorMessage = 'Không thể kết nối đến máy chủ. Vui lòng kiểm tra kết nối mạng hoặc thử lại sau.';
+      } else if (err.code === 'ECONNABORTED') {
+        errorMessage = 'Kết nối đã hết thời gian chờ. Vui lòng thử lại.';
+      }
+
+      message.error(errorMessage);
       setLoading(false);
     }
   };
@@ -68,10 +88,6 @@ export default function LoginPage() {
           name="login"
           onFinish={onFinish}
           size="large"
-          initialValues={{
-            email: 'admin@doublebakery.com',
-            password: 'admin123',
-          }}
         >
           <Form.Item
             name="email"

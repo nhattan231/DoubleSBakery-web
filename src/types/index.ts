@@ -224,6 +224,79 @@ export interface TopProduct {
   totalRevenue: number;
 }
 
+// ========== Store Settings Types ==========
+export interface OpeningHoursDay {
+  open: string;
+  close: string;
+  closed: boolean;
+}
+
+export interface OpeningHours {
+  monday: OpeningHoursDay;
+  tuesday: OpeningHoursDay;
+  wednesday: OpeningHoursDay;
+  thursday: OpeningHoursDay;
+  friday: OpeningHoursDay;
+  saturday: OpeningHoursDay;
+  sunday: OpeningHoursDay;
+}
+
+export interface StoreSettings {
+  id: string;
+  businessName: string;
+  slogan?: string;
+  description?: string;
+  logoUrl?: string;
+  bannerUrls: string[];
+  phone?: string;
+  zalo?: string;
+  email?: string;
+  address?: string;
+  googleMapsUrl?: string;
+  facebookUrl?: string;
+  instagramUrl?: string;
+  tiktokUrl?: string;
+  openingHours: OpeningHours;
+  specialNotice?: string;
+  isOrderingEnabled: boolean;
+  minOrderAmount: number;
+  preparationTime?: string;
+  deliveryFeeNote?: string;
+  deliveryArea?: string;
+  orderNote?: string;
+  paymentMethods: string[];
+  bankName?: string;
+  bankAccountNumber?: string;
+  bankAccountName?: string;
+  primaryColor: string;
+  secondaryColor: string;
+  menuLayout: 'grid' | 'list';
+  seoTitle?: string;
+  seoDescription?: string;
+  faviconUrl?: string;
+  isMenuPublic: boolean;
+  showPrices: boolean;
+  showDescription: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ========== Category Types ==========
+export interface Category {
+  id: string;
+  name: string;
+  description?: string;
+  imageUrl?: string;
+  sortOrder: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CategoryWithProducts extends Category {
+  products: Product[];
+}
+
 // ========== Standardized API Response ==========
 export interface PaginationMeta {
   total: number;

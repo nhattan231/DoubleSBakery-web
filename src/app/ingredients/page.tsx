@@ -23,9 +23,11 @@ import {
   Empty,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, WarningOutlined, UploadOutlined, HistoryOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
-import { ingredientsApi, uploadApi, inventoryApi } from '@/lib/api';
+import { ingredientsApi, uploadApi } from '@/lib/api';
 import { formatCurrency, formatDateTime } from '@/lib/format';
 import type { Ingredient, InventoryTransaction } from '@/types';
+import { useIngredientsQuery, useLowStockQuery, useIngredientHistoryQuery } from '@/lib/hooks';
+import { useQueryClient } from '@tanstack/react-query';
 
 const { Title } = Typography;
 const API_BASE = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:2316';
@@ -47,9 +49,8 @@ const getFullImageUrl = (url?: string) => {
 };
 
 export default function IngredientsPage() {
-  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
-  const [lowStockIngredients, setLowStockIngredients] = useState<Ingredient[]>([]);
-  const [loading, setLoading] = useState(false);
+  const queryClient = useQueryClient();
+
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Ingredient | null>(null);
   const [detailIngredient, setDetailIngredient] = useState<Ingredient | null>(null);
@@ -61,57 +62,40 @@ export default function IngredientsPage() {
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
   const [isMobile, setIsMobile] = useState(false);
 
+  // React Query: ingredients
+  const ingredientsQuery = useIngredientsQuery({ page: pagination.current, limit: pagination.pageSize });
+  const ingredients: Ingredient[] = ingredientsQuery.data?.list || [];
+  const loading = ingredientsQuery.isLoading;
+
+  // React Query: low stock
+  const { data: lowStockIngredients = [] } = useLowStockQuery();
+
   // Lịch sử nhập/xuất kho
-  const [historyData, setHistoryData] = useState<InventoryTransaction[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
   const [historyPagination, setHistoryPagination] = useState({ current: 1, pageSize: 10, total: 0 });
 
-  const fetchIngredients = async (page = 1) => {
-    setLoading(true);
-    try {
-      const res = await ingredientsApi.getAll({ page, limit: pagination.pageSize });
-      setIngredients(res.data.list || []);
-      setPagination((prev) => ({ ...prev, current: page, total: res.data.pagination?.total || 0 }));
-    } catch {
-      message.error('Không thể tải danh sách nguyên liệu');
-    } finally {
-      setLoading(false);
+  // React Query: ingredient history
+  const historyQuery = useIngredientHistoryQuery(detailIngredient?.id, historyPagination.current, historyPagination.pageSize);
+  const historyData = historyQuery.data?.list || [];
+  const historyLoading = historyQuery.isLoading;
+
+  // Update pagination total when ingredientsQuery data changes
+  useEffect(() => {
+    if (ingredientsQuery.data?.pagination?.total != null) {
+      setPagination((prev) => ({ ...prev, total: ingredientsQuery.data?.pagination?.total || 0 }));
     }
-  };
+  }, [ingredientsQuery.data?.pagination?.total]);
 
-  const fetchLowStock = async () => {
-    try {
-      const res = await ingredientsApi.getLowStock();
-      setLowStockIngredients(res.data.list || []);
-    } catch {}
-  };
-
-  // Fetch lịch sử kho cho nguyên liệu đang xem chi tiết
-  const fetchHistory = async (ingredientId: string, page = 1) => {
-    setHistoryLoading(true);
-    try {
-      const res = await inventoryApi.getTransactions({
-        ingredientId,
-        limit: historyPagination.pageSize,
-        page,
-      });
-      setHistoryData(res.data.list || []);
-      setHistoryPagination((prev) => ({ ...prev, current: page, total: res.data.pagination?.total || 0 }));
-    } catch (err) {
-      console.error('Lỗi khi tải lịch sử kho:', err);
-      setHistoryData([]);
-    } finally {
-      setHistoryLoading(false);
+  // Update history pagination total when historyQuery data changes
+  useEffect(() => {
+    if (historyQuery.data?.pagination?.total != null) {
+      setHistoryPagination((prev) => ({ ...prev, total: historyQuery.data?.pagination?.total || 0 }));
     }
-  };
+  }, [historyQuery.data?.pagination?.total]);
 
-  // Khi mở chi tiết nguyên liệu → fetch lịch sử
+  // Reset historyPagination to page 1 when detailIngredient changes
   useEffect(() => {
     if (detailIngredient?.id) {
-      setHistoryPagination((prev) => ({ ...prev, current: 1 }));
-      fetchHistory(detailIngredient.id, 1);
-    } else {
-      setHistoryData([]);
+      setHistoryPagination(prev => ({ ...prev, current: 1 }));
     }
   }, [detailIngredient?.id]);
 
@@ -121,11 +105,6 @@ export default function IngredientsPage() {
     const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
-  }, []);
-
-  useEffect(() => {
-    fetchIngredients();
-    fetchLowStock();
   }, []);
 
   const handleUpload = async (file: File) => {
@@ -185,8 +164,8 @@ export default function IngredientsPage() {
       setEditing(null);
       setImageUrl('');
       setImageList([]);
-      fetchIngredients(pagination.current);
-      fetchLowStock();
+      queryClient.invalidateQueries({ queryKey: ['ingredients'] });
+      queryClient.invalidateQueries({ queryKey: ['lowStock'] });
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Có lỗi xảy ra');
     } finally {
@@ -198,8 +177,8 @@ export default function IngredientsPage() {
     try {
       await ingredientsApi.delete(id);
       message.success('Xoá nguyên liệu thành công');
-      fetchIngredients(pagination.current);
-      fetchLowStock();
+      queryClient.invalidateQueries({ queryKey: ['ingredients'] });
+      queryClient.invalidateQueries({ queryKey: ['lowStock'] });
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Không thể xoá');
     }
@@ -379,9 +358,9 @@ export default function IngredientsPage() {
                 {pagination.total > pagination.pageSize && (
                   <div style={{ textAlign: 'center', padding: '12px 0' }}>
                     <Space>
-                      <Button size="small" disabled={pagination.current <= 1} onClick={() => fetchIngredients(pagination.current - 1)}>Trước</Button>
+                      <Button size="small" disabled={pagination.current <= 1} onClick={() => setPagination((prev) => ({ ...prev, current: prev.current - 1 }))}>Trước</Button>
                       <span style={{ fontSize: 13, color: '#666' }}>Trang {pagination.current} / {Math.ceil(pagination.total / pagination.pageSize)}</span>
-                      <Button size="small" disabled={pagination.current >= Math.ceil(pagination.total / pagination.pageSize)} onClick={() => fetchIngredients(pagination.current + 1)}>Sau</Button>
+                      <Button size="small" disabled={pagination.current >= Math.ceil(pagination.total / pagination.pageSize)} onClick={() => setPagination((prev) => ({ ...prev, current: prev.current + 1 }))}>Sau</Button>
                     </Space>
                   </div>
                 )}
@@ -400,7 +379,7 @@ export default function IngredientsPage() {
               current: pagination.current,
               pageSize: pagination.pageSize,
               total: pagination.total,
-              onChange: (page) => fetchIngredients(page),
+              onChange: (page) => setPagination((prev) => ({ ...prev, current: page })),
             }}
           />
         )}
@@ -623,9 +602,9 @@ export default function IngredientsPage() {
                       {historyPagination.total > historyPagination.pageSize && (
                         <div style={{ textAlign: 'center', padding: '8px 0' }}>
                           <Space>
-                            <Button size="small" disabled={historyPagination.current <= 1} onClick={() => fetchHistory(detailIngredient.id, historyPagination.current - 1)}>Trước</Button>
+                            <Button size="small" disabled={historyPagination.current <= 1} onClick={() => setHistoryPagination((prev) => ({ ...prev, current: prev.current - 1 }))}>Trước</Button>
                             <span style={{ fontSize: 12, color: '#999' }}>{historyPagination.total} giao dịch</span>
-                            <Button size="small" disabled={historyPagination.current >= Math.ceil(historyPagination.total / historyPagination.pageSize)} onClick={() => fetchHistory(detailIngredient.id, historyPagination.current + 1)}>Sau</Button>
+                            <Button size="small" disabled={historyPagination.current >= Math.ceil(historyPagination.total / historyPagination.pageSize)} onClick={() => setHistoryPagination((prev) => ({ ...prev, current: prev.current + 1 }))}>Sau</Button>
                           </Space>
                         </div>
                       )}
@@ -643,7 +622,7 @@ export default function IngredientsPage() {
                         total: historyPagination.total,
                         size: 'small',
                         showTotal: (total) => `${total} giao dịch`,
-                        onChange: (page) => fetchHistory(detailIngredient.id, page),
+                        onChange: (page) => setHistoryPagination((prev) => ({ ...prev, current: page })),
                       }}
                       columns={[
                         {

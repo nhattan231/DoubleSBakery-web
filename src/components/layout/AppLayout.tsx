@@ -22,6 +22,7 @@ import {
   HistoryOutlined,
   WarningOutlined,
   MenuOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '@/store/auth';
 import { ingredientsApi } from '@/lib/api';
@@ -75,6 +76,11 @@ const menuItems = [
     icon: <BarChartOutlined />,
     label: 'Báo cáo',
   },
+  {
+    key: '/settings',
+    icon: <SettingOutlined />,
+    label: 'Cài đặt',
+  },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -111,12 +117,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     setInitialized(true);
   }, [loadFromStorage]);
 
-  // Bước 2: Chỉ redirect khi đã load xong
+  // Bước 2: Chỉ redirect khi đã load xong (bỏ qua trang công khai)
+  const isPublicPage = pathname === '/login' || pathname === '/menu';
   useEffect(() => {
-    if (initialized && !isAuthenticated && pathname !== '/login') {
+    if (initialized && !isAuthenticated && !isPublicPage) {
       router.push('/login');
     }
-  }, [initialized, isAuthenticated, pathname, router]);
+  }, [initialized, isAuthenticated, pathname, router, isPublicPage]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -138,7 +145,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!isAuthenticated || pathname === '/login') {
+  if (!isAuthenticated || isPublicPage) {
     return <>{children}</>;
   }
 

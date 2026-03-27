@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Card,
   Table,
@@ -30,8 +30,9 @@ import {
   ShoppingCartOutlined,
 } from '@ant-design/icons';
 import { productionApi } from '@/lib/api';
+import { useEstimateHistoryQuery } from '@/lib/hooks';
 import { formatCurrency, formatDateTime } from '@/lib/format';
-import type { EstimateHistoryItem, EstimateType, PaginationMeta } from '@/types';
+import type { EstimateHistoryItem, EstimateType } from '@/types';
 import dayjs from 'dayjs';
 
 const { Title } = Typography;
@@ -57,14 +58,7 @@ function getDateRange(preset: DatePreset): [dayjs.Dayjs, dayjs.Dayjs] | null {
 
 export default function EstimateHistoryPage() {
   const [activeTab, setActiveTab] = useState<EstimateType>('ORDER');
-  const [data, setData] = useState<EstimateHistoryItem[]>([]);
-  const [pagination, setPagination] = useState<PaginationMeta>({
-    total: 0,
-    page: 1,
-    limit: 20,
-    totalPages: 0,
-  });
-  const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
   const [datePreset, setDatePreset] = useState<DatePreset>('all');
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
   const [searchText, setSearchText] = useState('');
@@ -74,6 +68,23 @@ export default function EstimateHistoryPage() {
   const [isMobile, setIsMobile] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
+  const historyQuery = useEstimateHistoryQuery({
+    page,
+    limit: 20,
+    type: activeTab,
+    startDate: dateRange ? dateRange[0].format('YYYY-MM-DD') : undefined,
+    endDate: dateRange ? dateRange[1].format('YYYY-MM-DD') : undefined,
+    search: searchText.trim() || undefined,
+  });
+  const data: EstimateHistoryItem[] = historyQuery.data?.list || [];
+  const pagination = historyQuery.data?.pagination || { total: 0, page: 1, limit: 20, totalPages: 0 };
+  const loading = historyQuery.isLoading;
+
+  // Reset page to 1 when filters change
+  useEffect(() => {
+    setPage(1);
+  }, [activeTab, dateRange, searchText]);
+
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 768px)');
     setIsMobile(mq.matches);
@@ -81,36 +92,6 @@ export default function EstimateHistoryPage() {
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
   }, []);
-
-  const fetchData = useCallback(
-    async (page = 1) => {
-      setLoading(true);
-      try {
-        const params: any = { page, limit: 20, type: activeTab };
-        if (dateRange) {
-          params.startDate = dateRange[0].format('YYYY-MM-DD');
-          params.endDate = dateRange[1].format('YYYY-MM-DD');
-        }
-        if (searchText.trim()) {
-          params.search = searchText.trim();
-        }
-        const res = await productionApi.getEstimateHistory(params);
-        setData(res.data.list || []);
-        setPagination(
-          res.data.pagination || { total: 0, page: 1, limit: 20, totalPages: 0 },
-        );
-      } catch {
-        message.error('Không thể tải lịch sử');
-      } finally {
-        setLoading(false);
-      }
-    },
-    [dateRange, activeTab, searchText],
-  );
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
 
   const handleViewDetail = async (id: string) => {
     setDetailLoading(true);
@@ -131,6 +112,7 @@ export default function EstimateHistoryPage() {
     setDatePreset('all');
     setDateRange(null);
     setSearchText('');
+    setPage(1);
   };
 
   const handlePresetChange = (preset: DatePreset) => {
@@ -426,7 +408,7 @@ export default function EstimateHistoryPage() {
         style={{ width: 200, minWidth: 160, flex: '1 1 160px' }}
       />
 
-      <Button icon={<ReloadOutlined />} onClick={() => fetchData()}>
+      <Button icon={<ReloadOutlined />} onClick={() => historyQuery.refetch()}>
         Tải lại
       </Button>
     </div>
@@ -489,9 +471,9 @@ export default function EstimateHistoryPage() {
               {pagination.total > pagination.limit && (
                 <div style={{ textAlign: 'center', padding: '12px 0' }}>
                   <Space>
-                    <Button size="small" disabled={pagination.page <= 1} onClick={() => fetchData(pagination.page - 1)}>Trước</Button>
+                    <Button size="small" disabled={pagination.page <= 1} onClick={() => setPage(pagination.page - 1)}>Trước</Button>
                     <span style={{ fontSize: 13, color: '#666' }}>Trang {pagination.page} / {pagination.totalPages}</span>
-                    <Button size="small" disabled={pagination.page >= pagination.totalPages} onClick={() => fetchData(pagination.page + 1)}>Sau</Button>
+                    <Button size="small" disabled={pagination.page >= pagination.totalPages} onClick={() => setPage(pagination.page + 1)}>Sau</Button>
                   </Space>
                 </div>
               )}
@@ -511,7 +493,7 @@ export default function EstimateHistoryPage() {
             total: pagination.total,
             showSizeChanger: false,
             showTotal: (total) => `Tổng ${total} bản ghi`,
-            onChange: (page) => fetchData(page),
+            onChange: (p) => setPage(p),
           }}
         />
       )}

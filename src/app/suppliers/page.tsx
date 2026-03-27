@@ -26,14 +26,16 @@ import {
   QuestionCircleOutlined,
   CheckCircleOutlined,
 } from '@ant-design/icons';
+import { useQueryClient } from '@tanstack/react-query';
 import { suppliersApi } from '@/lib/api';
+import { useSuppliersQuery } from '@/lib/hooks';
 import type { Supplier } from '@/types';
 
 const { Title } = Typography;
 
 export default function SuppliersPage() {
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [loading, setLoading] = useState(false);
+  const { data: suppliers = [], isLoading: loading } = useSuppliersQuery();
+  const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Supplier | null>(null);
   const [showGuide, setShowGuide] = useState(false);
@@ -49,22 +51,6 @@ export default function SuppliersPage() {
     return () => mq.removeEventListener('change', handler);
   }, []);
 
-  const fetchSuppliers = async () => {
-    setLoading(true);
-    try {
-      const res = await suppliersApi.getAll();
-      setSuppliers(res.data.list || []);
-    } catch {
-      message.error('Không thể tải danh sách nhà cung cấp');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchSuppliers();
-  }, []);
-
   const handleSubmit = async (values: any) => {
     setSubmitting(true);
     try {
@@ -78,7 +64,7 @@ export default function SuppliersPage() {
       setModalOpen(false);
       form.resetFields();
       setEditing(null);
-      fetchSuppliers();
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Có lỗi xảy ra');
     } finally {
@@ -90,7 +76,7 @@ export default function SuppliersPage() {
     try {
       await suppliersApi.delete(id);
       message.success('Đã ngừng hoạt động nhà cung cấp');
-      fetchSuppliers();
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Không thể xoá');
     }
@@ -100,7 +86,7 @@ export default function SuppliersPage() {
     try {
       await suppliersApi.update(id, { isActive: true });
       message.success('Đã kích hoạt lại nhà cung cấp');
-      fetchSuppliers();
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Có lỗi xảy ra');
     }

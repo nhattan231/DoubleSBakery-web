@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
   Card,
   Row,
@@ -35,7 +35,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from 'recharts';
-import { reportsApi } from '@/lib/api';
+import { useComparisonReport, useTopProductsReport, useRevenueReport } from '@/lib/hooks';
 import { formatCurrency } from '@/lib/format';
 import type { ComparisonReport, TopProduct } from '@/types';
 
@@ -111,45 +111,16 @@ function TopProductTooltipContent({ active, payload }: any) {
 }
 
 export default function ReportsPage() {
-  const [loading, setLoading] = useState(false);
-  const [comparison, setComparison] = useState<ComparisonReport | null>(null);
-  const [topProducts, setTopProducts] = useState<TopProduct[]>([]);
-  const [revenueData, setRevenueData] = useState<any[]>([]);
   const [dateRange, setDateRange] = useState<[string, string]>([
     dayjs().subtract(30, 'day').format('YYYY-MM-DD'),
     dayjs().format('YYYY-MM-DD'),
   ]);
 
-  const fetchReports = async () => {
-    setLoading(true);
-    const params = { startDate: dateRange[0], endDate: dateRange[1] };
-
-    try {
-      const [compRes, topRes, revenueRes] = await Promise.all([
-        reportsApi.comparison(params).catch(() => null),
-        reportsApi.topProducts(params).catch(() => null),
-        reportsApi.revenue(params).catch(() => null),
-      ]);
-
-      if (compRes) setComparison(compRes.data.data);
-      if (topRes) setTopProducts(topRes.data.list || []);
-      if (revenueRes) {
-        const daily = revenueRes.data.data?.dailyRevenue || [];
-        setRevenueData(
-          [...daily].sort((a: any, b: any) =>
-            new Date(a.date).getTime() - new Date(b.date).getTime(),
-          ),
-        );
-      }
-    } catch {
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchReports();
-  }, [dateRange]);
+  const params = { startDate: dateRange[0], endDate: dateRange[1] };
+  const { data: comparison = null, isLoading: isLoadingComparison } = useComparisonReport(params);
+  const { data: topProducts = [], isLoading: isLoadingTopProducts } = useTopProductsReport(params);
+  const { data: revenueData = [], isLoading: isLoadingRevenue } = useRevenueReport(params);
+  const loading = isLoadingComparison || isLoadingTopProducts || isLoadingRevenue;
 
   const current = comparison?.current;
   const changes = comparison?.changes;

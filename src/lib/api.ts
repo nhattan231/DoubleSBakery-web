@@ -149,6 +149,29 @@ export const uploadApi = {
   },
 };
 
+// ========== Store Settings API ==========
+export const storeSettingsApi = {
+  get: () => api.get('/store-settings'),
+  update: (data: any) => api.patch('/store-settings', data),
+  getPublic: () => api.get('/store-settings/public'),
+};
+
+// ========== Categories API ==========
+export const categoriesApi = {
+  getAll: () => api.get('/categories'),
+  getOne: (id: string) => api.get(`/categories/${id}`),
+  create: (data: any) => api.post('/categories', data),
+  update: (id: string, data: any) => api.patch(`/categories/${id}`, data),
+  delete: (id: string) => api.delete(`/categories/${id}`),
+  reorder: (items: { id: string; sortOrder: number }[]) =>
+    api.post('/categories/reorder', { items }),
+  getProductCategories: (productId: string) =>
+    api.get(`/categories/product/${productId}`),
+  setProductCategories: (productId: string, categoryIds: string[]) =>
+    api.post(`/categories/product/${productId}`, { categoryIds }),
+  getPublicMenu: () => api.get('/store-settings/public/menu'),
+};
+
 // ========== Reports API ==========
 export const reportsApi = {
   dashboard: () => api.get('/reports/dashboard'),

@@ -31,14 +31,15 @@ import {
   FileTextOutlined,
   InfoCircleOutlined,
 } from '@ant-design/icons';
-import { productsApi, productionApi, recipesApi } from '@/lib/api';
+import { productionApi, recipesApi } from '@/lib/api';
 import { formatCurrency } from '@/lib/format';
+import { useActiveProductsQuery } from '@/lib/hooks';
 import type { Product, EstimateResult, Recipe } from '@/types';
 
 const { Title, Text } = Typography;
 
 export default function EstimatePage() {
-  const [products, setProducts] = useState<Product[]>([]);
+  const { data: products = [] } = useActiveProductsQuery();
   const [result, setResult] = useState<EstimateResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm();
@@ -61,15 +62,6 @@ export default function EstimatePage() {
     const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
-  }, []);
-
-  useEffect(() => {
-    productsApi
-      .getAll({ limit: 100, status: 'active' })
-      .then((res) => {
-        setProducts(res.data.list || []);
-      })
-      .catch(() => {});
   }, []);
 
   const handleEstimate = async (values: any) => {
