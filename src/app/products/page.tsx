@@ -209,6 +209,9 @@ export default function ProductsPage() {
   const loadRecipeForTab = (tabKey: string) => {
     setActiveRecipeTab(tabKey);
     setCopiedFromSize(null);
+    // Reset form trước để tránh dữ liệu cũ bị giữ lại
+    recipeForm.resetFields();
+
     const sizeId = tabKey === 'default' ? null : tabKey;
     const recipe = productRecipes.find((r: any) =>
       sizeId ? r.sizeId === sizeId : !r.sizeId,
@@ -222,11 +225,11 @@ export default function ProductsPage() {
         })),
       });
     } else {
-      // Tìm công thức mẫu: ưu tiên Mặc định → size đầu tiên có công thức
+      // Tìm công thức mẫu: ưu tiên Mặc định → bất kỳ size nào có công thức
       const templateRecipe =
         productRecipes.find((r: any) => !r.sizeId) ||
         productRecipes[0];
-      if (templateRecipe) {
+      if (templateRecipe && templateRecipe.items?.length > 0) {
         const templateSizeName = !templateRecipe.sizeId
           ? 'Mặc định'
           : `Size ${selectedProduct?.sizes?.find((s: any) => s.id === templateRecipe.sizeId)?.name || ''}`;
@@ -238,8 +241,6 @@ export default function ProductsPage() {
           })),
         });
         setCopiedFromSize(templateSizeName);
-      } else {
-        recipeForm.resetFields();
       }
     }
   };

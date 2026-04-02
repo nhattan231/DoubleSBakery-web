@@ -9,6 +9,8 @@ import {
   recipesApi,
   productionApi,
   inventoryApi,
+  suppliesApi,
+  equipmentApi,
 } from '@/lib/api';
 import type {
   DashboardData,
@@ -21,6 +23,8 @@ import type {
   ComparisonReport,
   TopProduct,
   EstimateHistoryItem,
+  Supply,
+  Equipment,
 } from '@/types';
 
 // ========== Query Keys ==========
@@ -47,6 +51,9 @@ export const queryKeys = {
     topProducts: (params: any) => ['reports', 'topProducts', params] as const,
     revenue: (params: any) => ['reports', 'revenue', params] as const,
   },
+  supplies: (params?: any) => ['supplies', params] as const,
+  lowStockSupplies: ['lowStockSupplies'] as const,
+  equipment: (params?: any) => ['equipment', params] as const,
   estimateHistory: (params?: any) => ['estimateHistory', params] as const,
   estimateDetail: (id: string) => ['estimateHistory', id] as const,
 };
@@ -181,7 +188,7 @@ export function useDeleteProductMutation() {
 }
 
 // ========== Ingredients ==========
-export function useIngredientsQuery(params: { page: number; limit: number }) {
+export function useIngredientsQuery(params: { page: number; limit: number; search?: string }) {
   return useQuery({
     queryKey: queryKeys.ingredients(params),
     queryFn: async () => {
@@ -196,6 +203,28 @@ export function useAllIngredientsQuery() {
     queryKey: queryKeys.allIngredients,
     queryFn: async () => {
       const res = await ingredientsApi.getAll({ limit: 100 });
+      return res.data.list || [];
+    },
+    staleTime: 1000 * 60 * 5,
+  });
+}
+
+export function useAllSuppliesQuery() {
+  return useQuery<Supply[]>({
+    queryKey: ['supplies', { limit: 100 }],
+    queryFn: async () => {
+      const res = await suppliesApi.getAll({ limit: 100 });
+      return res.data.list || [];
+    },
+    staleTime: 1000 * 60 * 5,
+  });
+}
+
+export function useAllEquipmentQuery() {
+  return useQuery<Equipment[]>({
+    queryKey: ['equipment', { limit: 100 }],
+    queryFn: async () => {
+      const res = await equipmentApi.getAll({ limit: 100 });
       return res.data.list || [];
     },
     staleTime: 1000 * 60 * 5,
@@ -407,6 +436,103 @@ export function useRevenueReport(params: { startDate: string; endDate: string })
       return [...daily].sort(
         (a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime(),
       );
+    },
+  });
+}
+
+// ========== Supplies (Vật tư tiêu hao) ==========
+export function useSuppliesQuery(params: { page: number; limit: number; search?: string }) {
+  return useQuery({
+    queryKey: queryKeys.supplies(params),
+    queryFn: async () => {
+      const res = await suppliesApi.getAll(params);
+      return { list: res.data.list || [], pagination: res.data.pagination };
+    },
+  });
+}
+
+export function useLowStockSuppliesQuery() {
+  return useQuery<Supply[]>({
+    queryKey: queryKeys.lowStockSupplies,
+    queryFn: async () => {
+      const res = await suppliesApi.getLowStock();
+      return res.data.list || [];
+    },
+  });
+}
+
+export function useCreateSupplyMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: any) => suppliesApi.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['supplies'] });
+      queryClient.invalidateQueries({ queryKey: ['lowStockSupplies'] });
+    },
+  });
+}
+
+export function useUpdateSupplyMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) =>
+      suppliesApi.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['supplies'] });
+      queryClient.invalidateQueries({ queryKey: ['lowStockSupplies'] });
+    },
+  });
+}
+
+export function useDeleteSupplyMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => suppliesApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['supplies'] });
+      queryClient.invalidateQueries({ queryKey: ['lowStockSupplies'] });
+    },
+  });
+}
+
+// ========== Equipment (Dụng cụ) ==========
+export function useEquipmentQuery(params: { page: number; limit: number; search?: string }) {
+  return useQuery({
+    queryKey: queryKeys.equipment(params),
+    queryFn: async () => {
+      const res = await equipmentApi.getAll(params);
+      return { list: res.data.list || [], pagination: res.data.pagination };
+    },
+  });
+}
+
+export function useCreateEquipmentMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: any) => equipmentApi.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['equipment'] });
+    },
+  });
+}
+
+export function useUpdateEquipmentMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) =>
+      equipmentApi.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['equipment'] });
+    },
+  });
+}
+
+export function useDeleteEquipmentMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => equipmentApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['equipment'] });
     },
   });
 }

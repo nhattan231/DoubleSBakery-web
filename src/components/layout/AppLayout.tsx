@@ -49,7 +49,7 @@ const menuItems = [
   {
     key: '/ingredients',
     icon: <ExperimentOutlined />,
-    label: 'Nguyên liệu',
+    label: 'NL & Vật tư',
   },
   {
     key: '/suppliers',

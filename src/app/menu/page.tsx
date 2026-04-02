@@ -7,6 +7,8 @@ import {
   FacebookOutlined, InstagramOutlined, LinkOutlined,
   MailOutlined, ArrowLeftOutlined, ShoppingCartOutlined,
   StarFilled, LeftOutlined, RightOutlined, CloseOutlined,
+  CopyOutlined, DeleteOutlined, PlusOutlined, MinusOutlined,
+  CheckOutlined,
 } from '@ant-design/icons';
 import { useSearchParams } from 'next/navigation';
 import { storeSettingsApi, categoriesApi } from '@/lib/api';
@@ -41,6 +43,43 @@ function setCachedData(key: string, data: any): void {
   }
 }
 
+// ===== Note Cart (Ghi chú đơn hàng nhanh) =====
+const NOTE_CART_KEY = 'menu_note_cart';
+const NOTE_CART_TTL = 24 * 60 * 60 * 1000; // 24h
+
+interface NoteCartItem {
+  productId: string;
+  productName: string;
+  sizeName?: string;
+  sizeId?: string;
+  quantity: number;
+}
+
+function getNoteCart(): NoteCartItem[] {
+  try {
+    const raw = localStorage.getItem(NOTE_CART_KEY);
+    if (!raw) return [];
+    const { items, expiry } = JSON.parse(raw);
+    if (Date.now() > expiry) {
+      localStorage.removeItem(NOTE_CART_KEY);
+      return [];
+    }
+    return items || [];
+  } catch {
+    return [];
+  }
+}
+
+function saveNoteCart(items: NoteCartItem[]): void {
+  try {
+    if (items.length === 0) {
+      localStorage.removeItem(NOTE_CART_KEY);
+    } else {
+      localStorage.setItem(NOTE_CART_KEY, JSON.stringify({ items, expiry: Date.now() + NOTE_CART_TTL }));
+    }
+  } catch { /* ignore */ }
+}
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:2316';
 
 const getImageUrl = (url?: string | null): string => {
@@ -72,8 +111,88 @@ function MenuContent() {
   const [modalImgIdx, setModalImgIdx] = useState(0);
   const [modalSize, setModalSize] = useState<string | null>(null);
   const [parallaxY, setParallaxY] = useState(0);
+  const [noteCart, setNoteCart] = useState<NoteCartItem[]>([]);
+  const [noteDrawerOpen, setNoteDrawerOpen] = useState(false);
+  const [noteCopied, setNoteCopied] = useState(false);
+  const [noteAddedAnim, setNoteAddedAnim] = useState<string | null>(null); // productId for animation
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const featuredRef = useRef<HTMLDivElement>(null);
+
+  // Load note cart from localStorage on mount
+  useEffect(() => { setNoteCart(getNoteCart()); }, []);
+
+  const addToNote = (productName: string, productId: string, sizeName?: string, sizeId?: string) => {
+    setNoteCart((prev) => {
+      const key = `${productId}-${sizeId || 'default'}`;
+      const existing = prev.find((item) => `${item.productId}-${item.sizeId || 'default'}` === key);
+      let updated: NoteCartItem[];
+      if (existing) {
+        updated = prev.map((item) =>
+          `${item.productId}-${item.sizeId || 'default'}` === key
+            ? { ...item, quantity: item.quantity + 1 }
+            : item
+        );
+      } else {
+        updated = [...prev, { productId, productName, sizeName, sizeId, quantity: 1 }];
+      }
+      saveNoteCart(updated);
+      return updated;
+    });
+    setNoteAddedAnim(productId);
+    setTimeout(() => setNoteAddedAnim(null), 1200);
+  };
+
+  const updateNoteQty = (index: number, delta: number) => {
+    setNoteCart((prev) => {
+      const updated = prev.map((item, i) => {
+        if (i !== index) return item;
+        const newQty = item.quantity + delta;
+        return newQty > 0 ? { ...item, quantity: newQty } : item;
+      }).filter((item) => item.quantity > 0);
+      saveNoteCart(updated);
+      return updated;
+    });
+  };
+
+  const removeNoteItem = (index: number) => {
+    setNoteCart((prev) => {
+      const updated = prev.filter((_, i) => i !== index);
+      saveNoteCart(updated);
+      return updated;
+    });
+  };
+
+  const clearNoteCart = () => {
+    setNoteCart([]);
+    saveNoteCart([]);
+  };
+
+  const copyNoteToClipboard = () => {
+    if (noteCart.length === 0) return;
+    const lines = noteCart.map((item) => {
+      const size = item.sizeName ? ` (${item.sizeName})` : '';
+      return `- ${item.quantity}x ${item.productName}${size}`;
+    });
+    const text = `Em mu\u1ed1n \u0111\u1eb7t:\n${lines.join('\n')}`;
+    navigator.clipboard.writeText(text).then(() => {
+      setNoteCopied(true);
+      setTimeout(() => setNoteCopied(false), 2000);
+    }).catch(() => {
+      // Fallback for older browsers
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setNoteCopied(true);
+      setTimeout(() => setNoteCopied(false), 2000);
+    });
+  };
+
+  const noteCount = noteCart.reduce((sum, item) => sum + item.quantity, 0);
 
   useEffect(() => { loadPublicData(); }, []);
 
@@ -580,6 +699,8 @@ function MenuContent() {
                         setExpandImgIdx={setExpandImgIdx}
                         selectedSize={selectedSize}
                         setSelectedSize={setSelectedSize}
+                        onAddNote={addToNote}
+                        noteAddedAnim={noteAddedAnim}
                       />
                     ))}
                   </div>
@@ -697,6 +818,33 @@ function MenuContent() {
                                     <span style={{ fontSize: 20, fontWeight: 800, color: pc }}>{formatCurrency(product.price)}</span>
                                   </div>
                                 )}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const selSize = activeSizes.find((s) => s.id === selectedSize);
+                                    if (activeSizes.length > 0 && !selSize) {
+                                      const first = activeSizes[0];
+                                      addToNote(product.name, product.id, first.name, first.id);
+                                    } else {
+                                      addToNote(product.name, product.id, selSize?.name, selSize?.id);
+                                    }
+                                  }}
+                                  style={{
+                                    width: '100%', padding: '9px', marginBottom: 8,
+                                    background: noteAddedAnim === product.id ? '#52c41a' : `${pc}11`,
+                                    color: noteAddedAnim === product.id ? '#fff' : pc,
+                                    border: noteAddedAnim === product.id ? '2px solid #52c41a' : `2px solid ${pc}44`,
+                                    borderRadius: 8, cursor: 'pointer',
+                                    fontSize: 12, fontWeight: 700,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                                    transition: 'all 0.3s',
+                                  }}
+                                >
+                                  {noteAddedAnim === product.id
+                                    ? <><CheckOutlined /> Đã thêm!</>
+                                    : <><ShoppingCartOutlined /> Thêm vào ghi chú</>
+                                  }
+                                </button>
                                 <div style={{ display: 'flex', gap: 8 }}>
                                   {settings?.phone && (
                                     <a href={`tel:${settings.phone}`} onClick={(e) => e.stopPropagation()} style={{
@@ -833,8 +981,36 @@ function MenuContent() {
                   </div>
                 )}
 
+                {/* Add to note button */}
+                <button
+                  onClick={() => {
+                    const selSize = activeSizes.find((s) => s.id === modalSize);
+                    if (activeSizes.length > 0 && !selSize) {
+                      const first = activeSizes[0];
+                      addToNote(modalProduct.name, modalProduct.id, first.name, first.id);
+                    } else {
+                      addToNote(modalProduct.name, modalProduct.id, selSize?.name, selSize?.id);
+                    }
+                  }}
+                  style={{
+                    width: '100%', padding: '12px', marginTop: 16,
+                    background: noteAddedAnim === modalProduct.id ? '#52c41a' : `${pc}11`,
+                    color: noteAddedAnim === modalProduct.id ? '#fff' : pc,
+                    border: noteAddedAnim === modalProduct.id ? '2px solid #52c41a' : `2px solid ${pc}44`,
+                    borderRadius: 12, cursor: 'pointer',
+                    fontSize: 14, fontWeight: 700,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    transition: 'all 0.3s',
+                  }}
+                >
+                  {noteAddedAnim === modalProduct.id
+                    ? <><CheckOutlined /> Đã thêm!</>
+                    : <><ShoppingCartOutlined /> Thêm vào ghi chú</>
+                  }
+                </button>
+
                 {/* CTA buttons */}
-                <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
                   {settings?.phone && (
                     <a href={`tel:${settings.phone}`} style={{
                       flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
@@ -860,58 +1036,239 @@ function MenuContent() {
         );
       })()}
 
-      {/* ============ 5. FLOATING ACTION BUTTON (Zalo/Phone) ============ */}
-      {(settings.phone || settings.zalo) && (
-        <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 150, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
-          {/* Expanded options */}
-          {fabOpen && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, animation: 'fadeIn 0.2s' }}>
-              {settings.phone && (
-                <a href={`tel:${settings.phone}`} style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  background: '#fff', color: '#333', padding: '10px 18px', borderRadius: 28,
-                  boxShadow: '0 4px 16px rgba(0,0,0,0.15)', textDecoration: 'none',
-                  fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap',
+      {/* ============ NOTE CART DRAWER ============ */}
+      {noteDrawerOpen && (
+        <div onClick={() => setNoteDrawerOpen(false)} style={{
+          position: 'fixed', inset: 0, zIndex: 250,
+          background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(2px)',
+          animation: 'fadeIn 0.2s ease',
+        }}>
+          <div onClick={(e) => e.stopPropagation()} style={{
+            position: 'fixed', bottom: 0, right: 0, left: 0,
+            maxWidth: 440, margin: '0 auto',
+            background: '#fff', borderRadius: '20px 20px 0 0',
+            boxShadow: '0 -4px 30px rgba(0,0,0,0.2)',
+            maxHeight: '75vh', display: 'flex', flexDirection: 'column',
+            animation: 'slideUp 0.3s ease',
+          }}>
+            {/* Header */}
+            <div style={{
+              padding: '16px 20px 12px', borderBottom: '1px solid #f0f0f0',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <ShoppingCartOutlined style={{ fontSize: 18, color: pc }} />
+                <span style={{ fontSize: 16, fontWeight: 700, color: '#1a1a1a' }}>Ghi chú đặt hàng</span>
+                {noteCart.length > 0 && (
+                  <span style={{
+                    background: pc, color: '#fff', padding: '1px 8px',
+                    borderRadius: 12, fontSize: 12, fontWeight: 700,
+                  }}>{noteCount}</span>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {noteCart.length > 0 && (
+                  <button onClick={clearNoteCart} style={{
+                    background: 'none', border: 'none', color: '#ff4d4f',
+                    fontSize: 12, cursor: 'pointer', fontWeight: 600, padding: '4px 8px',
+                  }}>
+                    Xóa tất cả
+                  </button>
+                )}
+                <div onClick={() => setNoteDrawerOpen(false)} style={{
+                  width: 28, height: 28, borderRadius: '50%', background: '#f5f5f5',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                  fontSize: 12, color: '#999',
                 }}>
-                  <PhoneOutlined style={{ color: pc }} /> Gọi {settings.phone}
-                </a>
-              )}
-              {settings.zalo && (
-                <a href={`https://zalo.me/${settings.zalo}`} target="_blank" rel="noopener noreferrer" style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  background: '#fff', color: '#333', padding: '10px 18px', borderRadius: 28,
-                  boxShadow: '0 4px 16px rgba(0,0,0,0.15)', textDecoration: 'none',
-                  fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap',
-                }}>
-                  <span style={{ color: '#0068ff', fontWeight: 700 }}>Zalo</span> Nhắn tin
-                </a>
-              )}
-              {settings.googleMapsUrl && (
-                <a href={settings.googleMapsUrl} target="_blank" rel="noopener noreferrer" style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  background: '#fff', color: '#333', padding: '10px 18px', borderRadius: 28,
-                  boxShadow: '0 4px 16px rgba(0,0,0,0.15)', textDecoration: 'none',
-                  fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap',
-                }}>
-                  <EnvironmentOutlined style={{ color: '#ea4335' }} /> Xem bản đồ
-                </a>
+                  <CloseOutlined />
+                </div>
+              </div>
+            </div>
+
+            {/* Items */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '12px 20px' }}>
+              {noteCart.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '32px 0', color: '#ccc' }}>
+                  <ShoppingCartOutlined style={{ fontSize: 36, marginBottom: 8 }} />
+                  <p style={{ margin: 0, fontSize: 14 }}>Chưa có món nào</p>
+                  <p style={{ margin: '4px 0 0', fontSize: 12 }}>Chọn món từ menu rồi bấm "Thêm vào ghi chú"</p>
+                </div>
+              ) : (
+                noteCart.map((item, idx) => (
+                  <div key={`${item.productId}-${item.sizeId || 'default'}-${idx}`} style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '10px 0', borderBottom: idx < noteCart.length - 1 ? '1px solid #f5f5f5' : 'none',
+                  }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: '#333' }}>{item.productName}</div>
+                      {item.sizeName && (
+                        <span style={{ fontSize: 12, color: '#999' }}>{item.sizeName}</span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <button onClick={() => updateNoteQty(idx, -1)} style={{
+                        width: 28, height: 28, borderRadius: '50%', border: '1px solid #ddd',
+                        background: '#fff', cursor: 'pointer', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#666',
+                      }}>
+                        <MinusOutlined />
+                      </button>
+                      <span style={{ width: 24, textAlign: 'center', fontSize: 14, fontWeight: 700 }}>{item.quantity}</span>
+                      <button onClick={() => updateNoteQty(idx, 1)} style={{
+                        width: 28, height: 28, borderRadius: '50%', border: '1px solid #ddd',
+                        background: '#fff', cursor: 'pointer', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#666',
+                      }}>
+                        <PlusOutlined />
+                      </button>
+                    </div>
+                    <button onClick={() => removeNoteItem(idx)} style={{
+                      background: 'none', border: 'none', color: '#ff4d4f',
+                      cursor: 'pointer', fontSize: 14, padding: '4px',
+                    }}>
+                      <DeleteOutlined />
+                    </button>
+                  </div>
+                ))
               )}
             </div>
-          )}
-          {/* Main FAB button */}
-          <button onClick={() => setFabOpen(!fabOpen)} style={{
-            width: 56, height: 56, borderRadius: '50%', border: 'none',
-            background: pc, color: '#fff', fontSize: 22, cursor: 'pointer',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            transition: 'transform 0.3s',
-            transform: fabOpen ? 'rotate(45deg)' : 'rotate(0)',
-            animation: fabOpen ? 'none' : 'pulse 2s infinite',
-          }}>
-            {fabOpen ? <CloseOutlined /> : <PhoneOutlined />}
-          </button>
+
+            {/* Footer: Copy + CTA */}
+            {noteCart.length > 0 && (
+              <div style={{
+                padding: '12px 20px 20px', borderTop: '1px solid #f0f0f0',
+                display: 'flex', flexDirection: 'column', gap: 8,
+              }}>
+                {/* Preview text */}
+                <div style={{
+                  background: '#f9f7f4', borderRadius: 10, padding: '10px 14px',
+                  fontSize: 12, color: '#666', lineHeight: 1.6, maxHeight: 80, overflowY: 'auto',
+                }}>
+                  <span style={{ color: '#999' }}>Nội dung sẽ copy:</span><br />
+                  Em muốn đặt:<br />
+                  {noteCart.map((item, i) => (
+                    <span key={i}>- {item.quantity}x {item.productName}{item.sizeName ? ` (${item.sizeName})` : ''}<br /></span>
+                  ))}
+                </div>
+
+                <button onClick={copyNoteToClipboard} style={{
+                  width: '100%', padding: '12px', borderRadius: 12,
+                  background: noteCopied ? '#52c41a' : pc,
+                  color: '#fff', border: 'none', cursor: 'pointer',
+                  fontSize: 14, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  transition: 'background 0.3s',
+                }}>
+                  {noteCopied
+                    ? <><CheckOutlined /> Đã sao chép! Dán vào tin nhắn để đặt hàng</>
+                    : <><CopyOutlined /> Sao chép ghi chú</>
+                  }
+                </button>
+
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {settings?.phone && (
+                    <a href={`tel:${settings.phone}`} style={{
+                      flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                      padding: '10px', background: '#fff', color: pc, border: `2px solid ${pc}`, borderRadius: 10,
+                      fontSize: 13, fontWeight: 700, textDecoration: 'none',
+                    }}>
+                      <PhoneOutlined /> Gọi đặt
+                    </a>
+                  )}
+                  {settings?.zalo && (
+                    <a href={`https://zalo.me/${settings.zalo}`} target="_blank" rel="noopener noreferrer" style={{
+                      flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                      padding: '10px', background: '#fff', color: '#0068ff', border: '2px solid #0068ff', borderRadius: 10,
+                      fontSize: 13, fontWeight: 700, textDecoration: 'none',
+                    }}>
+                      Zalo
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
+
+      {/* ============ 5. FLOATING ACTION BUTTONS ============ */}
+      <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 150, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
+        {/* Contact FAB expanded options */}
+        {fabOpen && (settings.phone || settings.zalo) && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, animation: 'fadeIn 0.2s' }}>
+            {settings.phone && (
+              <a href={`tel:${settings.phone}`} style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                background: '#fff', color: '#333', padding: '10px 18px', borderRadius: 28,
+                boxShadow: '0 4px 16px rgba(0,0,0,0.15)', textDecoration: 'none',
+                fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap',
+              }}>
+                <PhoneOutlined style={{ color: pc }} /> Gọi {settings.phone}
+              </a>
+            )}
+            {settings.zalo && (
+              <a href={`https://zalo.me/${settings.zalo}`} target="_blank" rel="noopener noreferrer" style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                background: '#fff', color: '#333', padding: '10px 18px', borderRadius: 28,
+                boxShadow: '0 4px 16px rgba(0,0,0,0.15)', textDecoration: 'none',
+                fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap',
+              }}>
+                <span style={{ color: '#0068ff', fontWeight: 700 }}>Zalo</span> Nhắn tin
+              </a>
+            )}
+            {settings.googleMapsUrl && (
+              <a href={settings.googleMapsUrl} target="_blank" rel="noopener noreferrer" style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                background: '#fff', color: '#333', padding: '10px 18px', borderRadius: 28,
+                boxShadow: '0 4px 16px rgba(0,0,0,0.15)', textDecoration: 'none',
+                fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap',
+              }}>
+                <EnvironmentOutlined style={{ color: '#ea4335' }} /> Xem bản đồ
+              </a>
+            )}
+          </div>
+        )}
+
+        {/* FAB buttons row — dùng div thay button để tránh Tailwind Preflight reset */}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          {/* Note cart FAB */}
+          <div role="button" tabIndex={0} onClick={() => { setNoteDrawerOpen(true); setFabOpen(false); }} style={{
+            width: 50, height: 50, borderRadius: '50%', border: `2px solid ${pc}44`,
+            background: '#fff', color: pc, fontSize: 20, cursor: 'pointer',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            position: 'relative',
+          }}>
+            <ShoppingCartOutlined />
+            {noteCount > 0 && (
+              <span style={{
+                position: 'absolute', top: -4, right: -4,
+                background: '#ff4757', color: '#fff',
+                minWidth: 20, height: 20, borderRadius: 10,
+                padding: '0 4px',
+                fontSize: 11, fontWeight: 700,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                border: '2px solid #fff',
+              }}>{noteCount > 9 ? '9+' : noteCount}</span>
+            )}
+          </div>
+
+          {/* Phone/Contact FAB */}
+          {(settings.phone || settings.zalo) && (
+            <div role="button" tabIndex={0} onClick={() => setFabOpen(!fabOpen)} style={{
+              width: 56, height: 56, borderRadius: '50%', border: 'none',
+              background: pc, color: '#fff', fontSize: 22, cursor: 'pointer',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'transform 0.3s',
+              transform: fabOpen ? 'rotate(45deg)' : 'rotate(0)',
+              animation: fabOpen ? 'none' : 'pulse 2s infinite',
+            }}>
+              {fabOpen ? <CloseOutlined /> : <PhoneOutlined />}
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* ============ FOOTER ============ */}
       <footer style={{ background: '#1a1a1a', color: '#fff', padding: '50px 24px 30px' }}>
@@ -1090,11 +1447,14 @@ function FeaturedCard({ product, color, showPrices, onSelect }: {
 // =============================================
 function GridCard({ product, showPrices, showDescription, color, onSelect, staggerIndex = 0, isNew = false,
   isExpanded = false, anyExpanded = false, settings, getProductImages, expandImgIdx = 0, setExpandImgIdx, selectedSize, setSelectedSize,
+  onAddNote, noteAddedAnim,
 }: {
   product: Product; showPrices: boolean; showDescription: boolean; color: string; onSelect: () => void;
   staggerIndex?: number; isNew?: boolean; isExpanded?: boolean; anyExpanded?: boolean; settings?: any;
   getProductImages?: (p: Product) => string[]; expandImgIdx?: number; setExpandImgIdx?: (v: number | ((p: number) => number)) => void;
   selectedSize?: string | null; setSelectedSize?: (v: string | null) => void;
+  onAddNote?: (productName: string, productId: string, sizeName?: string, sizeId?: string) => void;
+  noteAddedAnim?: string | null;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const imgSrc = product.imageUrl ? getImageUrl(product.imageUrl) : null;
@@ -1286,6 +1646,38 @@ function GridCard({ product, showPrices, showDescription, color, onSelect, stagg
               </div>
             )}
 
+            {/* Add to note button */}
+            {onAddNote && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const selSize = activeSizes.find((s) => s.id === selectedSize);
+                  if (activeSizes.length > 0 && !selSize) {
+                    // Has sizes but none selected — auto-select first
+                    const first = activeSizes[0];
+                    onAddNote(product.name, product.id, first.name, first.id);
+                  } else {
+                    onAddNote(product.name, product.id, selSize?.name, selSize?.id);
+                  }
+                }}
+                style={{
+                  width: '100%', padding: '10px', marginBottom: 8,
+                  background: noteAddedAnim === product.id ? '#52c41a' : `${color}11`,
+                  color: noteAddedAnim === product.id ? '#fff' : color,
+                  border: noteAddedAnim === product.id ? '2px solid #52c41a' : `2px solid ${color}44`,
+                  borderRadius: 10, cursor: 'pointer',
+                  fontSize: 13, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  transition: 'all 0.3s',
+                }}
+              >
+                {noteAddedAnim === product.id
+                  ? <><CheckOutlined /> Đã thêm!</>
+                  : <><ShoppingCartOutlined /> Thêm vào ghi chú</>
+                }
+              </button>
+            )}
+
             {/* CTA buttons */}
             <div style={{ display: 'flex', gap: 8 }}>
               {settings?.phone && (
@@ -1365,120 +1757,123 @@ function NewProductsCarousel({ products, categoryName, categoryDesc, color, show
   };
 
   return (
-    <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 16px 12px' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-        <span className="new-badge-pulse" style={{
-          display: 'inline-flex', alignItems: 'center', gap: 5,
-          background: 'linear-gradient(135deg, #ff4757, #ff6b81)',
-          color: '#fff', padding: '5px 14px', borderRadius: 20,
-          fontSize: 13, fontWeight: 700, letterSpacing: 0.5,
-        }}>
-          ✨ MỚI
-        </span>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: '#1a1a1a' }}>{categoryName}</h2>
-        {categoryDesc && <span style={{ fontSize: 13, color: '#999' }}>— {categoryDesc}</span>}
-      </div>
+    <div style={{ position: 'relative', maxWidth: 1200, margin: '0 auto', padding: '24px 0 12px' }}>
+      {/* Main carousel content */}
+      <div style={{ maxWidth: 960, margin: '0 auto', padding: '0 16px' }}>
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <span className="new-badge-pulse" style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            background: 'linear-gradient(135deg, #ff4757, #ff6b81)',
+            color: '#fff', padding: '5px 14px', borderRadius: 20,
+            fontSize: 13, fontWeight: 700, letterSpacing: 0.5,
+          }}>
+            ✨ MỚI
+          </span>
+          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: '#1a1a1a' }}>{categoryName}</h2>
+          {categoryDesc && <span style={{ fontSize: 13, color: '#999' }}>— {categoryDesc}</span>}
+        </div>
 
-      {/* Carousel container */}
-      <div
-        style={{ overflow: 'hidden', borderRadius: 16, position: 'relative', padding: '8px 0' }}
-        onMouseEnter={() => setIsPaused(true)}
-        onMouseLeave={() => { setIsPaused(false); setHoveredId(null); }}
-      >
-        <div style={{
-          display: 'flex', gap: `${gap}px`, width: 'max-content',
-          animation: `newCarouselScroll ${duration}s linear infinite`,
-          animationPlayState: isPaused ? 'paused' : 'running',
-        }}>
-          {/* Render 3 sets for guaranteed seamless loop */}
-          {[0, 1, 2].map((set) =>
-            products.map((product, i) => {
-              const imgSrc = product.imageUrl ? getImageUrl(product.imageUrl) : null;
-              const uid = `${set}-${product.id}`;
-              const isHovered = hoveredId === uid;
-              const isDimmed = hoveredId !== null && !isHovered;
-              return (
-                <div
-                  key={uid}
-                  onClick={() => onSelect(product)}
-                  onMouseEnter={() => setHoveredId(uid)}
-                  onMouseLeave={() => setHoveredId(null)}
-                  style={{
-                    minWidth: cardW, width: cardW, flexShrink: 0,
-                    borderRadius: 14, overflow: 'hidden', cursor: 'pointer',
-                    background: '#fff', position: 'relative',
-                    border: `2.5px solid ${color}88`,
-                    boxShadow: isHovered ? `0 10px 35px ${color}33` : '0 2px 10px rgba(0,0,0,0.06)',
-                    transform: isHovered ? 'scale(1.06)' : isDimmed ? 'scale(0.96)' : 'scale(1)',
-                    opacity: isDimmed ? 0.45 : 1,
-                    transition: 'all 0.35s cubic-bezier(0.4,0,0.2,1)',
-                    zIndex: isHovered ? 10 : 1,
-                  }}
-                >
-                  {/* Image */}
-                  <div style={{ height: 240, overflow: 'hidden', position: 'relative' }}>
-                    {imgSrc ? (
-                      <img src={imgSrc} alt={product.name}
-                        style={{
-                          width: '100%', height: '100%', objectFit: 'cover',
-                          transform: isHovered ? 'scale(1.08)' : 'scale(1)',
-                          transition: 'transform 0.4s',
-                        }} />
-                    ) : (
-                      <div style={{ width: '100%', height: '100%', background: `${color}11`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 48 }}>🍰</div>
-                    )}
-                    {/* Badge */}
-                    <span className="new-badge-pulse" style={{
-                      position: 'absolute', top: 10, left: 10,
-                      background: 'linear-gradient(135deg, #ff4757, #ff6b81)', color: '#fff',
-                      padding: '3px 10px', borderRadius: 10, fontSize: 11, fontWeight: 700,
-                    }}>✨ MỚI</span>
-                    {/* Hover overlay */}
+        {/* Carousel container */}
+        <div
+          style={{ overflow: 'hidden', borderRadius: 16, position: 'relative', padding: '8px 0' }}
+          onMouseEnter={() => setIsPaused(true)}
+          onMouseLeave={() => { setIsPaused(false); setHoveredId(null); }}
+        >
+          <div style={{
+            display: 'flex', gap: `${gap}px`, width: 'max-content',
+            animation: `newCarouselScroll ${duration}s linear infinite`,
+            animationPlayState: isPaused ? 'paused' : 'running',
+          }}>
+            {/* Render 3 sets for guaranteed seamless loop */}
+            {[0, 1, 2].map((set) =>
+              products.map((product, i) => {
+                const imgSrc = product.imageUrl ? getImageUrl(product.imageUrl) : null;
+                const uid = `${set}-${product.id}`;
+                const isHovered = hoveredId === uid;
+                const isDimmed = hoveredId !== null && !isHovered;
+                return (
+                  <div
+                    key={uid}
+                    onClick={() => onSelect(product)}
+                    onMouseEnter={() => setHoveredId(uid)}
+                    onMouseLeave={() => setHoveredId(null)}
+                    style={{
+                      minWidth: cardW, width: cardW, flexShrink: 0,
+                      borderRadius: 14, overflow: 'hidden', cursor: 'pointer',
+                      background: '#fff', position: 'relative',
+                      border: `2.5px solid ${color}88`,
+                      boxShadow: isHovered ? `0 10px 35px ${color}33` : '0 2px 10px rgba(0,0,0,0.06)',
+                      transform: isHovered ? 'scale(1.06)' : isDimmed ? 'scale(0.96)' : 'scale(1)',
+                      opacity: isDimmed ? 0.45 : 1,
+                      transition: 'all 0.35s cubic-bezier(0.4,0,0.2,1)',
+                      zIndex: isHovered ? 10 : 1,
+                    }}
+                  >
+                    {/* Image */}
+                    <div style={{ height: 240, overflow: 'hidden', position: 'relative' }}>
+                      {imgSrc ? (
+                        <img src={imgSrc} alt={product.name}
+                          style={{
+                            width: '100%', height: '100%', objectFit: 'cover',
+                            transform: isHovered ? 'scale(1.08)' : 'scale(1)',
+                            transition: 'transform 0.4s',
+                          }} />
+                      ) : (
+                        <div style={{ width: '100%', height: '100%', background: `${color}11`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 48 }}>🍰</div>
+                      )}
+                      {/* Badge */}
+                      <span className="new-badge-pulse" style={{
+                        position: 'absolute', top: 10, left: 10,
+                        background: 'linear-gradient(135deg, #ff4757, #ff6b81)', color: '#fff',
+                        padding: '3px 10px', borderRadius: 10, fontSize: 11, fontWeight: 700,
+                      }}>✨ MỚI</span>
+                      {/* Hover overlay */}
+                      <div style={{
+                        position: 'absolute', inset: 0,
+                        background: 'linear-gradient(180deg, transparent 25%, rgba(0,0,0,0.8) 100%)',
+                        opacity: isHovered ? 1 : 0,
+                        transition: 'opacity 0.35s',
+                        display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
+                        padding: '16px',
+                      }}>
+                        <h4 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#fff' }}>{product.name}</h4>
+                        {showPrices && (
+                          <span style={{ fontSize: 15, fontWeight: 700, color: '#ffd32a', marginTop: 4 }}>
+                            {product.sizes?.length
+                              ? `Từ ${formatCurrency(getMinPrice(product))}`
+                              : formatCurrency(product.price)}
+                          </span>
+                        )}
+                        {product.description && (
+                          <p style={{ margin: '6px 0 0', fontSize: 12, color: 'rgba(255,255,255,0.7)', lineHeight: 1.4,
+                            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                            {product.description}
+                          </p>
+                        )}
+                        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 8 }}>Nhấn để xem chi tiết</span>
+                      </div>
+                    </div>
+                    {/* Name + price below (visible when NOT hovered) */}
                     <div style={{
-                      position: 'absolute', inset: 0,
-                      background: 'linear-gradient(180deg, transparent 25%, rgba(0,0,0,0.8) 100%)',
-                      opacity: isHovered ? 1 : 0,
-                      transition: 'opacity 0.35s',
-                      display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
-                      padding: '16px',
+                      padding: '12px 14px',
+                      opacity: isHovered ? 0 : 1,
+                      maxHeight: isHovered ? 0 : 60,
+                      overflow: 'hidden',
+                      transition: 'all 0.3s',
                     }}>
-                      <h4 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#fff' }}>{product.name}</h4>
+                      <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: '#333', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {product.name}
+                      </h4>
                       {showPrices && (
-                        <span style={{ fontSize: 15, fontWeight: 700, color: '#ffd32a', marginTop: 4 }}>
-                          {product.sizes?.length
-                            ? `Từ ${formatCurrency(getMinPrice(product))}`
-                            : formatCurrency(product.price)}
-                        </span>
+                        <span style={{ fontSize: 13, fontWeight: 700, color }}>{formatCurrency(getMinPrice(product))}</span>
                       )}
-                      {product.description && (
-                        <p style={{ margin: '6px 0 0', fontSize: 12, color: 'rgba(255,255,255,0.7)', lineHeight: 1.4,
-                          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                          {product.description}
-                        </p>
-                      )}
-                      <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 8 }}>Nhấn để xem chi tiết</span>
                     </div>
                   </div>
-                  {/* Name + price below (visible when NOT hovered) */}
-                  <div style={{
-                    padding: '12px 14px',
-                    opacity: isHovered ? 0 : 1,
-                    maxHeight: isHovered ? 0 : 60,
-                    overflow: 'hidden',
-                    transition: 'all 0.3s',
-                  }}>
-                    <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: '#333', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {product.name}
-                    </h4>
-                    {showPrices && (
-                      <span style={{ fontSize: 13, fontWeight: 700, color }}>{formatCurrency(getMinPrice(product))}</span>
-                    )}
-                  </div>
-                </div>
-              );
-            })
-          )}
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
 

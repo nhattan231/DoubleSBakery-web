@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useOrdersQuery, useActiveProductsQuery } from '@/lib/hooks';
+import { useOrdersQuery, useActiveProductsQuery, useAllSuppliesQuery } from '@/lib/hooks';
 import {
   Card,
   Table,
@@ -23,6 +23,7 @@ import {
   DatePicker,
   Radio,
   Spin,
+  Switch,
 } from 'antd';
 import {
   PlusOutlined,
@@ -36,10 +37,11 @@ import {
   ReloadOutlined,
   WarningOutlined,
   ExperimentOutlined,
+  InboxOutlined,
 } from '@ant-design/icons';
-import { ordersApi, productionApi } from '@/lib/api';
+import { ordersApi, productionApi, suppliesApi } from '@/lib/api';
 import { formatCurrency, formatDateTime, orderStatusMap } from '@/lib/format';
-import type { Order, Product, EstimateHistoryItem } from '@/types';
+import type { Order, Product, EstimateHistoryItem, Supply } from '@/types';
 import dayjs from 'dayjs';
 
 const { Title } = Typography;
@@ -101,6 +103,7 @@ export default function OrdersPage() {
   const loading = ordersQuery.isLoading;
   const paginationTotal = ordersQuery.data?.pagination?.total || 0;
   const { data: products = [] } = useActiveProductsQuery();
+  const { data: allSupplies = [] } = useAllSuppliesQuery();
 
   // Reset page to 1 when filters change
   useEffect(() => {
@@ -141,6 +144,15 @@ export default function OrdersPage() {
     }, 400);
   };
 
+  const supplyOptions = useMemo(() =>
+    allSupplies.map((s: any) => ({
+      value: s.id,
+      label: `${s.name} (${s.unit})`,
+      supply: s,
+    })),
+    [allSupplies],
+  );
+
   const handleCreate = async (values: any) => {
     setSubmitting(true);
     try {
@@ -160,12 +172,22 @@ export default function OrdersPage() {
           customPrice: Number(item.customPrice ?? 0),
         }));
 
+      const supplyItemsPayload = (values.supplyItems || [])
+        .filter((item: any) => item?.supplyId)
+        .map((item: any) => ({
+          supplyId: item.supplyId,
+          quantity: item.quantity || 1,
+          unitPrice: Number(item.unitPrice ?? 0),
+        }));
+
       const orderData = {
         customerName: values.customerName,
         phone: values.phone,
         address: values.address,
         notes: values.notes,
+        deductStock: values.deductStock !== false,
         items: [...normalItems, ...giftItems],
+        supplyItems: supplyItemsPayload,
       };
       await ordersApi.create(orderData);
       message.success('Tạo đơn hàng thành công');
@@ -213,11 +235,16 @@ export default function OrdersPage() {
       const res = await ordersApi.getOne(order.id);
       setSelectedOrder(res.data.data);
       setDetailOpen(true);
-      // Load estimate history cho đơn hàng này
-      productionApi
-        .getEstimateByOrder(order.id)
-        .then((estRes) => setOrderEstimate(estRes.data.data || null))
-        .catch(() => setOrderEstimate(null));
+      // Load estimate history cho đơn hàng này (chỉ khi đơn có xuất định lượng)
+      const orderData = res.data.data;
+      if (orderData.deductStock !== false) {
+        productionApi
+          .getEstimateByOrder(order.id)
+          .then((estRes) => setOrderEstimate(estRes.data.data || null))
+          .catch(() => setOrderEstimate(null));
+      } else {
+        setOrderEstimate(null);
+      }
     } catch {
       message.error('Không thể tải chi tiết đơn hàng');
     }
@@ -251,9 +278,16 @@ export default function OrdersPage() {
       title: 'Trạng thái',
       dataIndex: 'status',
       key: 'status',
-      render: (status: string) => {
+      render: (status: string, record: Order) => {
         const s = orderStatusMap[status] || { label: status, color: 'default' };
-        return <Tag color={s.color}>{s.label}</Tag>;
+        return (
+          <Space size={4}>
+            <Tag color={s.color}>{s.label}</Tag>
+            {record.deductStock === false && (
+              <Tag color="orange" style={{ fontSize: 10 }}>Không xuất kho</Tag>
+            )}
+          </Space>
+        );
       },
     },
     {
@@ -541,6 +575,31 @@ export default function OrdersPage() {
             <Input.TextArea rows={2} placeholder="Ghi chú cho đơn hàng (tuỳ chọn)" />
           </Form.Item>
 
+          {/* Toggle xuất kho toàn đơn */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '10px 14px',
+            background: '#f6ffed',
+            border: '1px solid #b7eb8f',
+            borderRadius: 8,
+            marginBottom: 16,
+          }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>
+                <ExperimentOutlined style={{ marginRight: 6, color: '#52c41a' }} />
+                Xuất kho khi xác nhận đơn
+              </div>
+              <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
+                Trừ nguyên liệu (theo công thức) và vật tư tiêu hao khỏi kho
+              </div>
+            </div>
+            <Form.Item name="deductStock" valuePropName="checked" initialValue={true} style={{ marginBottom: 0 }}>
+              <Switch checkedChildren="Xuất kho" unCheckedChildren="Không xuất" />
+            </Form.Item>
+          </div>
+
           <Divider>Sản phẩm</Divider>
 
           <Form.List name="items" rules={[{ validator: async (_, items) => {
@@ -745,6 +804,112 @@ export default function OrdersPage() {
             )}
           </Form.List>
 
+          {/* ========== Section vật tư đi kèm ========== */}
+          <Divider style={{ borderColor: '#d9d9d9' }}>
+            <Space size={6}>
+              <InboxOutlined style={{ color: '#1677ff' }} />
+              <span>Vật tư đi kèm</span>
+              <Tag color="blue" style={{ margin: 0 }}>tuỳ chọn</Tag>
+            </Space>
+          </Divider>
+
+          <Form.List name="supplyItems">
+            {(fields, { add, remove }) => (
+              <>
+                {fields.map(({ key, name, ...rest }) => {
+                  const supplyItemsList = form.getFieldValue('supplyItems') || [];
+                  const currentItem = supplyItemsList[name] || {};
+                  const selectedSupply = allSupplies.find((s: any) => s.id === currentItem.supplyId);
+                  const unitPrice = Number(currentItem.unitPrice ?? 0);
+                  const quantity = currentItem.quantity || 0;
+                  const subtotal = unitPrice * quantity;
+
+                  return (
+                    <div key={key} style={{
+                      display: 'flex',
+                      gap: 8,
+                      marginBottom: 8,
+                      padding: '8px 10px',
+                      background: '#fafafa',
+                      borderRadius: 8,
+                      border: '1px solid #f0f0f0',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                    }}>
+                      {/* Vật tư */}
+                      <Form.Item
+                        {...rest}
+                        name={[name, 'supplyId']}
+                        rules={[{ required: true, message: 'Chọn vật tư' }]}
+                        style={{ flex: '1 1 180px', minWidth: 180, marginBottom: 0 }}
+                      >
+                        <Select
+                          placeholder="Chọn vật tư..."
+                          showSearch
+                          optionFilterProp="label"
+                          options={supplyOptions}
+                        />
+                      </Form.Item>
+
+                      {/* Số lượng */}
+                      <Form.Item
+                        {...rest}
+                        name={[name, 'quantity']}
+                        rules={[{ required: true, message: 'SL' }]}
+                        initialValue={1}
+                        style={{ width: 80, marginBottom: 0 }}
+                      >
+                        <InputNumber min={1} style={{ width: '100%' }} placeholder="SL" />
+                      </Form.Item>
+
+                      {/* Đơn giá */}
+                      <Form.Item
+                        {...rest}
+                        name={[name, 'unitPrice']}
+                        initialValue={0}
+                        style={{ width: 110, marginBottom: 0 }}
+                      >
+                        <InputNumber
+                          min={0}
+                          step={1000}
+                          style={{ width: '100%' }}
+                          placeholder="Giá"
+                          addonAfter="₫"
+                          formatter={(val) => val ? `${val}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''}
+                          parser={(val) => (val ? Number(val.replace(/,/g, '')) : 0) as any}
+                        />
+                      </Form.Item>
+
+                      {/* Thành tiền */}
+                      <div style={{ minWidth: 80, textAlign: 'right', fontSize: 13, fontWeight: 500, color: subtotal > 0 ? '#8B6914' : '#bfbfbf' }}>
+                        {subtotal > 0 ? formatCurrency(subtotal) : '0 ₫'}
+                      </div>
+
+                      {/* Xoá */}
+                      <Button
+                        danger
+                        type="text"
+                        icon={<DeleteOutlined />}
+                        onClick={() => remove(name)}
+                        size="small"
+                      />
+                    </div>
+                  );
+                })}
+
+                <Button
+                  type="dashed"
+                  onClick={() => add({ quantity: 1, unitPrice: 0 })}
+                  block
+                  icon={<InboxOutlined />}
+                  style={{ marginTop: 4, borderColor: '#1677ff', color: '#1677ff' }}
+                >
+                  Thêm vật tư
+                </Button>
+              </>
+            )}
+          </Form.List>
+
           {/* ========== Section quà tặng kèm ========== */}
           <Divider style={{ borderColor: '#d9d9d9' }}>
             <Space size={6}>
@@ -945,9 +1110,15 @@ export default function OrdersPage() {
                 return sum + (Number(item.customPrice ?? 0) * (item.quantity || 1));
               }, 0);
 
-              const grandTotal = productTotal + giftTotal;
+              const supplyItemsData = form.getFieldValue('supplyItems') || [];
+              const supplyTotal = supplyItemsData.reduce((sum: number, item: any) => {
+                if (!item?.supplyId) return sum;
+                return sum + (Number(item.unitPrice ?? 0) * (item.quantity || 1));
+              }, 0);
 
-              if (items.length === 0 && giftItems.length === 0) return null;
+              const grandTotal = productTotal + giftTotal + supplyTotal;
+
+              if (items.length === 0 && giftItems.length === 0 && supplyItemsData.length === 0) return null;
 
               return (
                 <div style={{
@@ -961,6 +1132,12 @@ export default function OrdersPage() {
                     <span>Sản phẩm</span>
                     <span>{formatCurrency(productTotal)}</span>
                   </div>
+                  {supplyItemsData.length > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 13, color: '#1677ff' }}>
+                      <span>Vật tư đi kèm</span>
+                      <span>{formatCurrency(supplyTotal)}</span>
+                    </div>
+                  )}
                   {giftItems.length > 0 && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 13, color: '#eb2f96' }}>
                       <span>Quà tặng kèm</span>
@@ -1017,7 +1194,13 @@ export default function OrdersPage() {
                 </strong>
               </Descriptions.Item>
               <Descriptions.Item label="Ngày tạo">{formatDateTime(selectedOrder.createdAt)}</Descriptions.Item>
-              <Descriptions.Item label="Ghi chú">{selectedOrder.notes || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Xuất kho">
+                {selectedOrder.deductStock !== false
+                  ? <Tag color="green">Có xuất kho</Tag>
+                  : <Tag color="orange">Không xuất kho</Tag>
+                }
+              </Descriptions.Item>
+              <Descriptions.Item label="Ghi chú" span={2}>{selectedOrder.notes || '-'}</Descriptions.Item>
             </Descriptions>
 
             <Divider>Sản phẩm trong đơn</Divider>
@@ -1095,8 +1278,39 @@ export default function OrdersPage() {
               />
             )}
 
-            {/* ========== Chi tiết định lượng ========== */}
-            {orderEstimate && (
+            {/* ========== Vật tư đi kèm ========== */}
+            {selectedOrder?.supplyItems && selectedOrder.supplyItems.length > 0 && (
+              <>
+                <Divider style={{ margin: '12px 0' }}>
+                  <Space size={4}>
+                    <InboxOutlined style={{ color: '#1677ff' }} />
+                    <span style={{ fontSize: 13 }}>Vật tư đi kèm</span>
+                  </Space>
+                </Divider>
+                {selectedOrder.supplyItems.map((si: any) => (
+                  <div key={si.id} style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '6px 0',
+                    borderBottom: '1px solid #f5f5f5',
+                    fontSize: 13,
+                  }}>
+                    <div>
+                      <span>{si.supply?.name || '—'}</span>
+                      <Tag style={{ marginLeft: 6, fontSize: 10 }}>{si.supply?.unit}</Tag>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <span style={{ color: '#666' }}>{Number(si.quantity).toLocaleString()} × {formatCurrency(si.unitPrice)}</span>
+                      <span style={{ marginLeft: 8, fontWeight: 600, color: '#8B6914' }}>{formatCurrency(si.subtotal)}</span>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+
+            {/* ========== Chi tiết định lượng (chỉ hiển thị khi đơn có xuất định lượng) ========== */}
+            {orderEstimate && selectedOrder.deductStock !== false && (
               <>
                 <Divider>
                   <Space>
@@ -1238,7 +1452,7 @@ export default function OrdersPage() {
               </>
             )}
 
-            {selectedOrder.status === 'pending' && (
+            {selectedOrder.status === 'pending' && selectedOrder.deductStock !== false && (
               <div style={{ marginTop: 12, color: '#999', fontSize: 12, fontStyle: 'italic' }}>
                 * Thông tin định lượng sẽ hiển thị sau khi đơn hàng được xác nhận.
               </div>

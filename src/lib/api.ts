@@ -55,13 +55,34 @@ export const productsApi = {
 
 // ========== Ingredients API ==========
 export const ingredientsApi = {
-  getAll: (params?: { page?: number; limit?: number }) =>
+  getAll: (params?: { page?: number; limit?: number; search?: string }) =>
     api.get('/ingredients', { params }),
   getOne: (id: string) => api.get(`/ingredients/${id}`),
   create: (data: any) => api.post('/ingredients', data),
   update: (id: string, data: any) => api.patch(`/ingredients/${id}`, data),
   delete: (id: string) => api.delete(`/ingredients/${id}`),
   getLowStock: () => api.get('/ingredients/low-stock'),
+};
+
+// ========== Supplies API (Vật tư tiêu hao) ==========
+export const suppliesApi = {
+  getAll: (params?: { page?: number; limit?: number; search?: string }) =>
+    api.get('/supplies', { params }),
+  getOne: (id: string) => api.get(`/supplies/${id}`),
+  create: (data: any) => api.post('/supplies', data),
+  update: (id: string, data: any) => api.patch(`/supplies/${id}`, data),
+  delete: (id: string) => api.delete(`/supplies/${id}`),
+  getLowStock: () => api.get('/supplies/low-stock'),
+};
+
+// ========== Equipment API (Dụng cụ) ==========
+export const equipmentApi = {
+  getAll: (params?: { page?: number; limit?: number; search?: string }) =>
+    api.get('/equipment', { params }),
+  getOne: (id: string) => api.get(`/equipment/${id}`),
+  create: (data: any) => api.post('/equipment', data),
+  update: (id: string, data: any) => api.patch(`/equipment/${id}`, data),
+  delete: (id: string) => api.delete(`/equipment/${id}`),
 };
 
 // ========== Recipes API ==========

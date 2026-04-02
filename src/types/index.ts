@@ -77,6 +77,15 @@ export interface OrderItem {
   subtotal: number;
 }
 
+export interface OrderSupplyItem {
+  id: string;
+  supplyId: string;
+  supply: Supply;
+  quantity: number;
+  unitPrice: number;
+  subtotal: number;
+}
+
 export interface Order {
   id: string;
   orderNumber: string;
@@ -86,7 +95,9 @@ export interface Order {
   status: OrderStatus;
   totalAmount: number;
   notes?: string;
+  deductStock: boolean;
   items: OrderItem[];
+  supplyItems?: OrderSupplyItem[];
   createdAt: string;
   updatedAt: string;
 }
@@ -104,8 +115,13 @@ export interface Supplier {
 // ========== Purchase Order Types ==========
 export interface PurchaseOrderItem {
   id: string;
-  ingredientId: string;
-  ingredient: Ingredient;
+  itemType: 'ingredient' | 'supply' | 'equipment';
+  ingredientId?: string;
+  ingredient?: Ingredient;
+  supplyId?: string;
+  supply?: Supply;
+  equipmentId?: string;
+  equipment?: Equipment;
   quantity: number;
   unitPrice: number;
   subtotal: number;
@@ -295,6 +311,38 @@ export interface Category {
 
 export interface CategoryWithProducts extends Category {
   products: Product[];
+}
+
+// ========== Supply Types (Vật tư tiêu hao) ==========
+export interface Supply {
+  id: string;
+  name: string;
+  unit: 'piece' | 'pack' | 'roll' | 'sheet' | 'box' | 'bag';
+  currentStock: number;
+  minStock: number;
+  costPerUnit: number;
+  imageUrl?: string;
+  images?: string[];
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ========== Equipment Types (Dụng cụ) ==========
+export type EquipmentCondition = 'good' | 'worn' | 'broken' | 'replaced';
+
+export interface Equipment {
+  id: string;
+  name: string;
+  quantity: number;
+  condition: EquipmentCondition;
+  purchasePrice: number;
+  purchaseDate?: string;
+  imageUrl?: string;
+  images?: string[];
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // ========== Standardized API Response ==========

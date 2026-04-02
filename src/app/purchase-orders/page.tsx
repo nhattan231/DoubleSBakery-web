@@ -27,6 +27,9 @@ import {
   Row,
   Col,
   Spin,
+  Segmented,
+  Checkbox,
+  Steps,
 } from 'antd';
 import dayjs from 'dayjs';
 import {
@@ -46,12 +49,13 @@ import {
   InfoCircleOutlined,
   ClearOutlined,
   CalendarOutlined,
+  CopyOutlined,
 } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
-import { purchaseOrdersApi, ingredientsApi, uploadApi } from '@/lib/api';
-import { usePurchaseOrdersQuery, useAllIngredientsQuery, useActiveSuppliersQuery } from '@/lib/hooks';
+import { purchaseOrdersApi, ingredientsApi, suppliesApi, equipmentApi, uploadApi } from '@/lib/api';
+import { usePurchaseOrdersQuery, useAllIngredientsQuery, useAllSuppliesQuery, useAllEquipmentQuery, useActiveSuppliersQuery } from '@/lib/hooks';
 import { formatCurrency, formatDateTime, formatDate, poStatusMap } from '@/lib/format';
-import type { PurchaseOrder, Ingredient, Supplier } from '@/types';
+import type { PurchaseOrder, Ingredient, Supply, Equipment, Supplier } from '@/types';
 
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -116,29 +120,197 @@ const unitOptions = [
   { value: 'tsp', label: 'Muỗng cà phê (tsp)' },
 ];
 
+const supplyUnitOptions = [
+  { value: 'piece', label: 'Cái' },
+  { value: 'pack', label: 'Gói/Bịch' },
+  { value: 'roll', label: 'Cuộn' },
+  { value: 'sheet', label: 'Tờ' },
+  { value: 'box', label: 'Hộp' },
+  { value: 'bag', label: 'Túi' },
+];
+
+const conditionOptions = [
+  { value: 'good', label: 'Tốt' },
+  { value: 'worn', label: 'Cũ / Mòn' },
+  { value: 'broken', label: 'Hỏng' },
+  { value: 'replaced', label: 'Đã thay' },
+];
+
+type DrawerCategory = 'ingredient' | 'supply' | 'equipment';
+
+const drawerCategoryLabels: Record<DrawerCategory, string> = {
+  ingredient: 'nguyên liệu',
+  supply: 'vật tư',
+  equipment: 'dụng cụ',
+};
+
+const drawerCategorySegments = [
+  { value: 'ingredient', label: '🧪 Nguyên liệu' },
+  { value: 'supply', label: '📦 Vật tư' },
+  { value: 'equipment', label: '🔧 Dụng cụ' },
+];
+
 // ============================================================
-// Sub-component: Mỗi dòng nguyên liệu trong form
+// Bulk Paste helpers
 // ============================================================
-interface IngredientRowProps {
+type BulkItemCategory = 'ingredient' | 'supply' | 'equipment';
+
+interface BulkPasteRow {
+  key: string;
+  selected: boolean;
+  name: string;         // Tên dán từ Excel
+  quantity: number;
+  unitPrice: number;
+  category: BulkItemCategory;
+  matchedId?: string;   // ID match được trong DB
+  matchedName?: string; // Tên match
+  matchScore: 'exact' | 'partial' | 'none';
+}
+
+const classifyByName = (name: string): { category: BulkItemCategory; unit: string } => {
+  const n = name.toLowerCase();
+  const equipmentKw = ['khuôn', 'khuon', 'nhiệt kế', 'nhiet ke', 'rây', 'ray', 'dĩa', 'dia', 'muỗng nhỏ inox', 'muỗng inox', 'muỗng lớn', 'dao', 'thớt', 'nồi', 'chảo', 'máy'];
+  for (const kw of equipmentKw) { if (n.includes(kw)) return { category: 'equipment', unit: 'piece' }; }
+  const supplyKw = ['hộp', 'hop', 'túi', 'tui', 'muỗng gỗ', 'muong go', 'giấy nướng', 'giay nuong', 'giấy bạc', 'cốc giấy', 'ống hút', 'bao bì', 'hũ đựng', 'hu dung', 'hũ'];
+  for (const kw of supplyKw) { if (n.includes(kw)) return { category: 'supply', unit: 'piece' }; }
+  if (n.match(/\d+\s*kg/) || n.includes('1kg')) return { category: 'ingredient', unit: 'kg' };
+  if (n.match(/\d+\s*g/) && !n.includes('kg')) return { category: 'ingredient', unit: 'g' };
+  if (n.match(/\d+\s*ml/)) return { category: 'ingredient', unit: 'ml' };
+  if (n.match(/\d+\s*l/) && !n.includes('ml')) return { category: 'ingredient', unit: 'l' };
+  const ingredientKw = ['bột', 'bot', 'đường', 'duong', 'socola', 'chocolate', 'gelatin', 'baking', 'soda', 'nở', 'vani', 'bơ', 'sữa', 'sua', 'kem', 'trứng', 'trung', 'cacao', 'dầu', 'muối', 'mật ong'];
+  for (const kw of ingredientKw) { if (n.includes(kw)) return { category: 'ingredient', unit: 'g' }; }
+  return { category: 'ingredient', unit: 'g' };
+};
+
+const parseNumber = (val: string): number => {
+  if (!val) return 0;
+  const s = val.trim();
+  if (/,\d{3}/.test(s)) { return parseFloat(s.replace(/,/g, '').replace(/[^\d.]/g, '')) || 0; }
+  if (/\.\d{3}/.test(s)) { return parseFloat(s.replace(/\./g, '').replace(/,/g, '.').replace(/[^\d.]/g, '')) || 0; }
+  return parseFloat(s.replace(/[^\d.]/g, '')) || 0;
+};
+
+/** Parse cột Loại: NL / VT / DC (case-insensitive) */
+const parseCategoryCode = (code: string): BulkItemCategory | null => {
+  const c = code.trim().toUpperCase();
+  if (c === 'NL') return 'ingredient';
+  if (c === 'VT') return 'supply';
+  if (c === 'DC') return 'equipment';
+  return null;
+};
+
+const parseBulkPasteData = (text: string): Omit<BulkPasteRow, 'matchedId' | 'matchedName' | 'matchScore'>[] => {
+  const lines = text.trim().split('\n').filter((l) => l.trim());
+  const rows: Omit<BulkPasteRow, 'matchedId' | 'matchedName' | 'matchScore'>[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const cells = line.includes('\t') ? line.split('\t') : line.split(/\s{2,}/);
+    const cleaned = cells.map((c) => c.trim()).filter(Boolean);
+    if (cleaned.length < 2) continue;
+    const firstLower = cleaned[0].toLowerCase();
+    if (i === 0 && (firstLower.includes('tên') || firstLower.includes('stt') || firstLower === '#' || firstLower.includes('name') || firstLower.includes('loại'))) continue;
+
+    let name = '', quantity = 0, unitPrice = 0;
+    let explicitCategory: BulkItemCategory | null = null;
+    const firstIsNumber = /^\d+$/.test(cleaned[0]);
+
+    // Detect cột Loại ở cuối (NL / VT / DC)
+    const lastCell = cleaned[cleaned.length - 1];
+    const lastIsCategory = parseCategoryCode(lastCell);
+    const dataCells = lastIsCategory ? cleaned.slice(0, -1) : cleaned;
+    if (lastIsCategory) explicitCategory = lastIsCategory;
+
+    if (firstIsNumber && dataCells.length >= 4) { name = dataCells[1]; quantity = parseNumber(dataCells[2]); unitPrice = parseNumber(dataCells[3]); }
+    else if (firstIsNumber && dataCells.length === 3) { name = dataCells[1]; quantity = parseNumber(dataCells[2]); unitPrice = 0; }
+    else if (firstIsNumber && dataCells.length === 2) { name = dataCells[1]; quantity = 1; unitPrice = 0; }
+    else if (!firstIsNumber && dataCells.length >= 3) { name = dataCells[0]; quantity = parseNumber(dataCells[1]); unitPrice = parseNumber(dataCells[2]); }
+    else if (!firstIsNumber && dataCells.length === 2) { name = dataCells[0]; quantity = parseNumber(dataCells[1]); unitPrice = 0; }
+    else if (!firstIsNumber && dataCells.length === 1) { name = dataCells[0]; quantity = 1; unitPrice = 0; }
+    else continue;
+    if (!name) continue;
+
+    const category = explicitCategory || classifyByName(name).category;
+    rows.push({ key: `bp-${i}`, selected: true, name, quantity, unitPrice, category });
+  }
+  return rows;
+};
+
+/** Fuzzy match tên paste với danh sách items trong DB */
+const matchItemByName = (
+  pasteName: string,
+  category: BulkItemCategory,
+  ingredientsList: Ingredient[],
+  suppliesList: Supply[],
+  equipmentList: Equipment[],
+): { id: string; name: string; score: 'exact' | 'partial' | 'none' } => {
+  const n = pasteName.toLowerCase().trim();
+
+  // Chọn danh sách theo category
+  const items: { id: string; name: string }[] =
+    category === 'ingredient' ? ingredientsList.map((i) => ({ id: i.id, name: i.name })) :
+    category === 'supply' ? suppliesList.map((s) => ({ id: s.id, name: s.name })) :
+    equipmentList.map((e) => ({ id: e.id, name: e.name }));
+
+  // Exact match
+  const exact = items.find((i) => i.name.toLowerCase().trim() === n);
+  if (exact) return { id: exact.id, name: exact.name, score: 'exact' };
+
+  // Partial match: tên paste chứa trong tên DB hoặc ngược lại
+  const partial = items.find((i) => {
+    const dbName = i.name.toLowerCase().trim();
+    return dbName.includes(n) || n.includes(dbName);
+  });
+  if (partial) return { id: partial.id, name: partial.name, score: 'partial' };
+
+  return { id: '', name: '', score: 'none' };
+};
+
+const bulkCategoryLabels: Record<BulkItemCategory, { label: string; tag: string; color: string }> = {
+  ingredient: { label: 'Nguyên liệu', tag: 'NL', color: 'blue' },
+  supply: { label: 'Vật tư', tag: 'VT', color: 'orange' },
+  equipment: { label: 'Dụng cụ', tag: 'DC', color: 'green' },
+};
+
+// ============================================================
+// Sub-component: Mỗi dòng hàng nhập trong form
+// ============================================================
+type POItemType = 'ingredient' | 'supply' | 'equipment';
+
+const itemTypeOptions = [
+  { value: 'ingredient', label: '🧪 Nguyên liệu' },
+  { value: 'supply', label: '📦 Vật tư' },
+  { value: 'equipment', label: '🔧 Dụng cụ' },
+];
+
+interface ItemRowProps {
   name: number;
   rest: any;
   ingredientOptions: { value: string; label: string; ingredient: Ingredient }[];
-  onIngredientChange: (name: number, ingredientId: string) => void;
+  supplyOptions: { value: string; label: string; supply: Supply }[];
+  equipmentOptions: { value: string; label: string; equipment: Equipment }[];
+  onItemChange: (name: number, itemType: string, itemId: string) => void;
+  onItemTypeChange: (name: number, itemType: string) => void;
   onRemove: (name: number) => void;
   getSelectedUnit: (name: number) => string;
   form: any;
 }
 
-function IngredientRow({
+function ItemRow({
   name,
   rest,
   ingredientOptions,
-  onIngredientChange,
+  supplyOptions,
+  equipmentOptions,
+  onItemChange,
+  onItemTypeChange,
   onRemove,
   getSelectedUnit,
   form,
-}: IngredientRowProps) {
+}: ItemRowProps) {
   const unit = getSelectedUnit(name);
+  const items = form.getFieldValue('items') || [];
+  const currentItemType: POItemType = items[name]?.itemType || 'ingredient';
 
   return (
     <div
@@ -155,75 +327,117 @@ function IngredientRow({
         flexWrap: 'wrap',
       }}
     >
-      {/* Nguyên liệu */}
+      {/* Loại */}
       <Form.Item
         {...rest}
-        name={[name, 'ingredientId']}
-        rules={[{ required: true, message: 'Chọn nguyên liệu' }]}
-        style={{ flex: '1 1 220px', minWidth: 220, marginBottom: 8 }}
+        name={[name, 'itemType']}
+        initialValue="ingredient"
+        style={{ width: 150, marginBottom: 8 }}
       >
         <Select
-          placeholder="Tìm nguyên liệu..."
-          showSearch
-          optionFilterProp="label"
-          onChange={(val) => onIngredientChange(name, val)}
-          options={ingredientOptions}
-          optionRender={(option) => {
-            const ing = option.data.ingredient as Ingredient;
-            if (!ing) return option.label;
-            const isLow = ing.currentStock <= ing.minStock;
-            return (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
-                <img
-                  src={getFullImageUrl(ing.imageUrl) || PLACEHOLDER_IMG}
-                  alt={ing.name}
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 4,
-                    objectFit: 'cover',
-                    border: '1px solid #f0f0f0',
-                    flexShrink: 0,
-                  }}
-                  onError={(e) => { (e.target as HTMLImageElement).src = PLACEHOLDER_IMG; }}
-                />
-                <div style={{ flex: 1, minWidth: 0, lineHeight: 1.3 }}>
-                  <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {ing.name}
-                  </div>
-                  <div style={{ fontSize: 12, color: isLow ? '#ff4d4f' : '#999' }}>
-                    {isLow && <WarningOutlined style={{ marginRight: 4 }} />}
-                    Tồn: {Number(ing.currentStock).toLocaleString('vi-VN')} {ing.unit}
-                    {isLow && ' (thiếu)'}
-                  </div>
-                </div>
-              </div>
-            );
-          }}
-          labelRender={(props) => {
-            const ing = ingredientOptions.find((o) => o.value === props.value)?.ingredient;
-            if (!ing) return props.label;
-            return (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <img
-                  src={getFullImageUrl(ing.imageUrl) || PLACEHOLDER_IMG}
-                  alt={ing.name}
-                  style={{ width: 22, height: 22, borderRadius: 3, objectFit: 'cover' }}
-                  onError={(e) => { (e.target as HTMLImageElement).src = PLACEHOLDER_IMG; }}
-                />
-                <span>{ing.name} ({ing.unit})</span>
-              </div>
-            );
-          }}
+          options={itemTypeOptions}
+          onChange={(val) => onItemTypeChange(name, val)}
         />
       </Form.Item>
+
+      {/* Item selector - changes based on itemType */}
+      {currentItemType === 'ingredient' && (
+        <Form.Item
+          {...rest}
+          name={[name, 'ingredientId']}
+          rules={[{ required: true, message: 'Chọn nguyên liệu' }]}
+          style={{ flex: '1 1 200px', minWidth: 200, marginBottom: 8 }}
+        >
+          <Select
+            placeholder="Tìm nguyên liệu..."
+            showSearch
+            optionFilterProp="label"
+            onChange={(val) => onItemChange(name, 'ingredient', val)}
+            options={ingredientOptions}
+            optionRender={(option) => {
+              const ing = option.data.ingredient as Ingredient;
+              if (!ing) return option.label;
+              return (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+                  <div style={{ flex: 1, minWidth: 0, lineHeight: 1.3 }}>
+                    <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {ing.name}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#999' }}>
+                      Tồn: {Number(ing.currentStock).toLocaleString('vi-VN')} {ing.unit}
+                    </div>
+                  </div>
+                </div>
+              );
+            }}
+          />
+        </Form.Item>
+      )}
+
+      {currentItemType === 'supply' && (
+        <Form.Item
+          {...rest}
+          name={[name, 'supplyId']}
+          rules={[{ required: true, message: 'Chọn vật tư' }]}
+          style={{ flex: '1 1 200px', minWidth: 200, marginBottom: 8 }}
+        >
+          <Select
+            placeholder="Tìm vật tư..."
+            showSearch
+            optionFilterProp="label"
+            onChange={(val) => onItemChange(name, 'supply', val)}
+            options={supplyOptions}
+            optionRender={(option) => {
+              const sup = option.data.supply as Supply;
+              if (!sup) return option.label;
+              return (
+                <div style={{ lineHeight: 1.3, padding: '4px 0' }}>
+                  <div style={{ fontWeight: 500 }}>{sup.name}</div>
+                  <div style={{ fontSize: 12, color: '#999' }}>
+                    Tồn: {Number(sup.currentStock).toLocaleString('vi-VN')} {sup.unit}
+                  </div>
+                </div>
+              );
+            }}
+          />
+        </Form.Item>
+      )}
+
+      {currentItemType === 'equipment' && (
+        <Form.Item
+          {...rest}
+          name={[name, 'equipmentId']}
+          rules={[{ required: true, message: 'Chọn dụng cụ' }]}
+          style={{ flex: '1 1 200px', minWidth: 200, marginBottom: 8 }}
+        >
+          <Select
+            placeholder="Tìm dụng cụ..."
+            showSearch
+            optionFilterProp="label"
+            onChange={(val) => onItemChange(name, 'equipment', val)}
+            options={equipmentOptions}
+            optionRender={(option) => {
+              const eq = option.data.equipment as Equipment;
+              if (!eq) return option.label;
+              return (
+                <div style={{ lineHeight: 1.3, padding: '4px 0' }}>
+                  <div style={{ fontWeight: 500 }}>{eq.name}</div>
+                  <div style={{ fontSize: 12, color: '#999' }}>
+                    SL: {eq.quantity}
+                  </div>
+                </div>
+              );
+            }}
+          />
+        </Form.Item>
+      )}
 
       {/* Số lượng */}
       <Form.Item
         {...rest}
         name={[name, 'quantity']}
         rules={[{ required: true, message: 'Nhập SL' }]}
-        style={{ width: 140, marginBottom: 8 }}
+        style={{ width: 130, marginBottom: 8 }}
       >
         <InputNumber
           placeholder="Số lượng"
@@ -238,7 +452,7 @@ function IngredientRow({
         {...rest}
         name={[name, 'unitPrice']}
         rules={[{ required: true, message: 'Nhập giá' }]}
-        style={{ width: 160, marginBottom: 8 }}
+        style={{ width: 150, marginBottom: 8 }}
       >
         <InputNumber
           placeholder="Đơn giá"
@@ -252,7 +466,7 @@ function IngredientRow({
       </Form.Item>
 
       {/* Thành tiền (read-only) */}
-      <Form.Item shouldUpdate style={{ width: 130, marginBottom: 8 }}>
+      <Form.Item shouldUpdate style={{ width: 120, marginBottom: 8 }}>
         {() => {
           const items = form.getFieldValue('items') || [];
           const qty = items[name]?.quantity || 0;
@@ -306,7 +520,7 @@ export default function PurchaseOrdersPage() {
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm();
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
-  const [selectedIngredientMap, setSelectedIngredientMap] = useState<Record<number, string>>({});
+  const [selectedItemMap, setSelectedItemMap] = useState<Record<number, { type: string; id: string; unit: string }>>({});
 
   const [isMobile, setIsMobile] = useState(false);
   const [mobilePage, setMobilePage] = useState(1);
@@ -321,8 +535,9 @@ export default function PurchaseOrdersPage() {
   // Minimize / Draft states
   const [minimized, setMinimized] = useState(false);
 
-  // Drawer tạo nguyên liệu nhanh
+  // Drawer tạo nguyên liệu / vật tư / dụng cụ nhanh
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerCategory, setDrawerCategory] = useState<DrawerCategory>('ingredient');
   const [drawerForm] = Form.useForm();
   const [drawerImageList, setDrawerImageList] = useState<string[]>([]);
   const [drawerImageUrl, setDrawerImageUrl] = useState('');
@@ -334,6 +549,8 @@ export default function PurchaseOrdersPage() {
   const purchaseOrders: PurchaseOrder[] = posQuery.data?.list || [];
   const loading = posQuery.isLoading;
   const { data: ingredients = [] } = useAllIngredientsQuery();
+  const { data: allSupplies = [] } = useAllSuppliesQuery();
+  const { data: allEquipment = [] } = useAllEquipmentQuery();
   const { data: suppliers = [] } = useActiveSuppliersQuery();
 
   // Update pagination total when posQuery data changes
@@ -446,35 +663,82 @@ export default function PurchaseOrdersPage() {
     [ingredients, form],
   );
 
+  const buildSupplyOptions = useCallback(
+    (excludeFieldName: number) => {
+      const allItems = form.getFieldValue('items') || [];
+      const selectedIds = allItems
+        .filter((_: any, idx: number) => idx !== excludeFieldName)
+        .map((item: any) => item?.supplyId)
+        .filter(Boolean);
+      return allSupplies
+        .filter((s) => !selectedIds.includes(s.id))
+        .map((s) => ({
+          value: s.id,
+          label: `${s.name} (${s.unit})`,
+          supply: s,
+        }));
+    },
+    [allSupplies, form],
+  );
+
+  const buildEquipmentOptions = useCallback(
+    (excludeFieldName: number) => {
+      const allItems = form.getFieldValue('items') || [];
+      const selectedIds = allItems
+        .filter((_: any, idx: number) => idx !== excludeFieldName)
+        .map((item: any) => item?.equipmentId)
+        .filter(Boolean);
+      return allEquipment
+        .filter((e) => !selectedIds.includes(e.id))
+        .map((e) => ({
+          value: e.id,
+          label: e.name,
+          equipment: e,
+        }));
+    },
+    [allEquipment, form],
+  );
+
   // ========== Handlers ==========
-  const handleIngredientChange = useCallback(
-    (fieldName: number, ingredientId: string) => {
-      const ing = ingredientMap.get(ingredientId);
-      if (!ing) return;
+  const handleItemChange = useCallback((fieldName: number, itemType: string, itemId: string) => {
+    let unit = '';
+    if (itemType === 'ingredient') {
+      const ing = ingredients.find((i) => i.id === itemId);
+      unit = ing?.unit || '';
+    } else if (itemType === 'supply') {
+      const sup = allSupplies.find((s) => s.id === itemId);
+      unit = sup?.unit || '';
+    } else if (itemType === 'equipment') {
+      unit = 'cái';
+    }
+    setSelectedItemMap((prev) => ({ ...prev, [fieldName]: { type: itemType, id: itemId, unit } }));
+  }, [ingredients, allSupplies]);
 
-      setSelectedIngredientMap((prev) => ({ ...prev, [fieldName]: ingredientId }));
+  const handleItemTypeChange = useCallback((fieldName: number, newType: string) => {
+    // Clear the item selection when type changes
+    const items = form.getFieldValue('items') || [];
+    const updatedItems = [...items];
+    if (updatedItems[fieldName]) {
+      updatedItems[fieldName] = {
+        ...updatedItems[fieldName],
+        itemType: newType,
+        ingredientId: undefined,
+        supplyId: undefined,
+        equipmentId: undefined,
+      };
+      form.setFieldsValue({ items: updatedItems });
+    }
+    setSelectedItemMap((prev) => {
+      const next = { ...prev };
+      delete next[fieldName];
+      return next;
+    });
+  }, [form]);
 
-      const items = form.getFieldValue('items') || [];
-      if (items[fieldName] && !items[fieldName].unitPrice && ing.costPerUnit > 0) {
-        const newItems = [...items];
-        newItems[fieldName] = { ...newItems[fieldName], unitPrice: Number(ing.costPerUnit) };
-        form.setFieldsValue({ items: newItems });
-      }
-
-      setFormDirty(true);
-    },
-    [ingredientMap, form],
-  );
-
-  const getSelectedUnit = useCallback(
-    (fieldName: number) => {
-      const items = form.getFieldValue('items') || [];
-      const ingId = items[fieldName]?.ingredientId || selectedIngredientMap[fieldName];
-      if (!ingId) return '';
-      return ingredientMap.get(ingId)?.unit || '';
-    },
-    [ingredientMap, selectedIngredientMap, form],
-  );
+  const getSelectedUnit = useCallback((fieldName: number) => {
+    const item = selectedItemMap[fieldName];
+    return item?.unit || '';
+  }, [selectedItemMap]);
 
   const handleCreate = useCallback(async (values: any) => {
     setSubmitting(true);
@@ -483,7 +747,10 @@ export default function PurchaseOrdersPage() {
         supplierId: values.supplierId,
         notes: values.notes,
         items: values.items.map((item: any) => ({
+          itemType: item.itemType || 'ingredient',
           ingredientId: item.ingredientId,
+          supplyId: item.supplyId,
+          equipmentId: item.equipmentId,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
         })),
@@ -494,7 +761,7 @@ export default function PurchaseOrdersPage() {
       setFormDirty(false);
       setMinimized(false);
       form.resetFields();
-      setSelectedIngredientMap({});
+      setSelectedItemMap({});
       sessionStorage.removeItem(DRAFT_STORAGE_KEY);
       queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
     } catch (err: any) {
@@ -558,6 +825,7 @@ export default function PurchaseOrdersPage() {
     const newItems = lowStockIngredients
       .filter((i) => !alreadySelected.has(i.id))
       .map((i) => ({
+        itemType: 'ingredient' as const,
         ingredientId: i.id,
         quantity: undefined,
         unitPrice: i.costPerUnit > 0 ? Number(i.costPerUnit) : undefined,
@@ -629,7 +897,7 @@ export default function PurchaseOrdersPage() {
           setFormDirty(false);
           setMinimized(false);
           form.resetFields();
-          setSelectedIngredientMap({});
+          setSelectedItemMap({});
           sessionStorage.removeItem(DRAFT_STORAGE_KEY);
         },
         onCancel: () => {
@@ -639,7 +907,7 @@ export default function PurchaseOrdersPage() {
     } else {
       setModalOpen(false);
       form.resetFields();
-      setSelectedIngredientMap({});
+      setSelectedItemMap({});
     }
   }, [formDirty, form, handleMinimize]);
 
@@ -687,12 +955,21 @@ export default function PurchaseOrdersPage() {
   const handleDrawerSubmit = useCallback(async (values: any) => {
     setDrawerSubmitting(true);
     try {
-      const res = await ingredientsApi.create(values);
-      const newIngredient: Ingredient = res.data.data;
-      message.success(`Đã tạo nguyên liệu "${values.name}" thành công`);
+      const label = drawerCategoryLabels[drawerCategory];
 
-      // Refresh danh sách ingredients
-      await queryClient.invalidateQueries({ queryKey: ['ingredients'] });
+      if (drawerCategory === 'ingredient') {
+        await ingredientsApi.create(values);
+        await queryClient.invalidateQueries({ queryKey: ['ingredients'] });
+      } else if (drawerCategory === 'supply') {
+        await suppliesApi.create(values);
+        await queryClient.invalidateQueries({ queryKey: ['supplies'] });
+        await queryClient.invalidateQueries({ queryKey: ['lowStockSupplies'] });
+      } else {
+        await equipmentApi.create(values);
+        await queryClient.invalidateQueries({ queryKey: ['equipment'] });
+      }
+
+      message.success(`Đã tạo ${label} "${values.name}" thành công`);
 
       // Đóng drawer
       setDrawerOpen(false);
@@ -700,18 +977,136 @@ export default function PurchaseOrdersPage() {
       setDrawerImageList([]);
       setDrawerImageUrl('');
     } catch (err: any) {
-      message.error(err.response?.data?.message || 'Tạo nguyên liệu thất bại');
+      const label = drawerCategoryLabels[drawerCategory];
+      message.error(err.response?.data?.message || `Tạo ${label} thất bại`);
     } finally {
       setDrawerSubmitting(false);
     }
-  }, [drawerForm, queryClient]);
+  }, [drawerForm, drawerCategory, queryClient]);
 
   const handleOpenDrawer = useCallback(() => {
     drawerForm.resetFields();
     setDrawerImageList([]);
     setDrawerImageUrl('');
+    setDrawerCategory('ingredient');
     setDrawerOpen(true);
   }, [drawerForm]);
+
+  const handleDrawerCategoryChange = useCallback((value: string | number) => {
+    drawerForm.resetFields();
+    setDrawerImageList([]);
+    setDrawerImageUrl('');
+    setDrawerCategory(value as DrawerCategory);
+  }, [drawerForm]);
+
+  // ========== Bulk Paste: Dán từ Excel ==========
+  const [bulkPasteOpen, setBulkPasteOpen] = useState(false);
+  const [bulkPasteStep, setBulkPasteStep] = useState<0 | 1>(0);
+  const [bulkPasteText, setBulkPasteText] = useState('');
+  const [bulkPasteRows, setBulkPasteRows] = useState<BulkPasteRow[]>([]);
+
+  const bulkPasteSelectedCount = bulkPasteRows.filter((r) => r.selected && r.matchScore !== 'none').length;
+  const bulkPasteUnmatchedCount = bulkPasteRows.filter((r) => r.selected && r.matchScore === 'none').length;
+
+  const handleBulkPasteOpen = useCallback(() => {
+    setBulkPasteText('');
+    setBulkPasteRows([]);
+    setBulkPasteStep(0);
+    setBulkPasteOpen(true);
+  }, []);
+
+  const handleBulkPasteParse = useCallback(() => {
+    if (!bulkPasteText.trim()) {
+      message.warning('Vui lòng dán dữ liệu từ Excel vào');
+      return;
+    }
+    const parsed = parseBulkPasteData(bulkPasteText);
+    if (parsed.length === 0) {
+      message.error('Không nhận diện được dữ liệu. Vui lòng kiểm tra format.');
+      return;
+    }
+    // Match với DB
+    const matched: BulkPasteRow[] = parsed.map((row) => {
+      const result = matchItemByName(row.name, row.category, ingredients, allSupplies, allEquipment);
+      return {
+        ...row,
+        matchedId: result.id || undefined,
+        matchedName: result.name || undefined,
+        matchScore: result.score,
+      };
+    });
+    setBulkPasteRows(matched);
+    setBulkPasteStep(1);
+  }, [bulkPasteText, ingredients, allSupplies, allEquipment]);
+
+  const handleBulkPasteToggleRow = useCallback((key: string) => {
+    setBulkPasteRows((prev) => prev.map((r) => r.key === key ? { ...r, selected: !r.selected } : r));
+  }, []);
+
+  const handleBulkPasteToggleAll = useCallback((checked: boolean) => {
+    setBulkPasteRows((prev) => prev.map((r) => r.matchScore !== 'none' ? { ...r, selected: checked } : r));
+  }, []);
+
+  const handleBulkPasteChangeMatch = useCallback((key: string, newId: string, category: BulkItemCategory) => {
+    // User chọn thủ công từ dropdown
+    const list = category === 'ingredient' ? ingredients : category === 'supply' ? allSupplies : allEquipment;
+    const found = list.find((i: any) => i.id === newId);
+    setBulkPasteRows((prev) => prev.map((r) =>
+      r.key === key ? { ...r, matchedId: newId, matchedName: found?.name || '', matchScore: 'exact' } : r
+    ));
+  }, [ingredients, allSupplies, allEquipment]);
+
+  const handleBulkPasteAddToForm = useCallback(() => {
+    const validRows = bulkPasteRows.filter((r) => r.selected && r.matchedId && r.matchScore !== 'none');
+    if (validRows.length === 0) {
+      message.warning('Không có mục nào hợp lệ để thêm');
+      return;
+    }
+
+    const currentItems = form.getFieldValue('items') || [];
+    const existingIds = new Set(
+      currentItems.map((item: any) => item?.ingredientId || item?.supplyId || item?.equipmentId).filter(Boolean)
+    );
+
+    const newItems = validRows
+      .filter((r) => !existingIds.has(r.matchedId))
+      .map((r) => ({
+        itemType: r.category,
+        ingredientId: r.category === 'ingredient' ? r.matchedId : undefined,
+        supplyId: r.category === 'supply' ? r.matchedId : undefined,
+        equipmentId: r.category === 'equipment' ? r.matchedId : undefined,
+        quantity: r.quantity,
+        unitPrice: r.unitPrice,
+      }));
+
+    if (newItems.length === 0) {
+      message.info('Tất cả mục đã có trong phiếu nhập');
+      return;
+    }
+
+    // Update selectedItemMap for unit display
+    const newMap = { ...selectedItemMap };
+    const startIdx = currentItems.length;
+    newItems.forEach((item: any, idx: number) => {
+      let unit = '';
+      if (item.itemType === 'ingredient') {
+        const ing = ingredients.find((i) => i.id === item.ingredientId);
+        unit = ing?.unit || '';
+      } else if (item.itemType === 'supply') {
+        const sup = allSupplies.find((s) => s.id === item.supplyId);
+        unit = sup?.unit || '';
+      } else {
+        unit = 'cái';
+      }
+      newMap[startIdx + idx] = { type: item.itemType, id: item.ingredientId || item.supplyId || item.equipmentId, unit };
+    });
+    setSelectedItemMap(newMap);
+
+    form.setFieldsValue({ items: [...currentItems, ...newItems] });
+    setFormDirty(true);
+    message.success(`Đã thêm ${newItems.length} mục vào phiếu nhập`);
+    setBulkPasteOpen(false);
+  }, [bulkPasteRows, form, selectedItemMap, ingredients, allSupplies, allEquipment]);
 
   // ========== Table columns ==========
   const columns = useMemo(() => [
@@ -828,7 +1223,7 @@ export default function PurchaseOrdersPage() {
             onClick={() => {
               form.resetFields();
               setFormDirty(false);
-              setSelectedIngredientMap({});
+              setSelectedItemMap({});
               setMinimized(false);
               sessionStorage.removeItem(DRAFT_STORAGE_KEY);
               setModalOpen(true);
@@ -1194,11 +1589,14 @@ export default function PurchaseOrdersPage() {
                 {fields.map(({ key, name, ...rest }) => (
                   <Form.Item shouldUpdate={(prev, cur) => prev.items !== cur.items} noStyle key={key}>
                     {() => (
-                      <IngredientRow
+                      <ItemRow
                         name={name}
                         rest={rest}
                         ingredientOptions={buildIngredientOptions(name)}
-                        onIngredientChange={handleIngredientChange}
+                        supplyOptions={buildSupplyOptions(name)}
+                        equipmentOptions={buildEquipmentOptions(name)}
+                        onItemChange={handleItemChange}
+                        onItemTypeChange={handleItemTypeChange}
                         onRemove={remove}
                         getSelectedUnit={getSelectedUnit}
                         form={form}
@@ -1207,23 +1605,33 @@ export default function PurchaseOrdersPage() {
                   </Form.Item>
                 ))}
 
-                <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
                   <Button
                     type="dashed"
                     onClick={() => add()}
-                    block
+                    style={{ flex: '1 1 auto' }}
                     icon={<PlusOutlined />}
                   >
-                    Thêm nguyên liệu
+                    Thêm dòng
                   </Button>
-                  <Tooltip title="Tạo nguyên liệu mới nếu chưa có trong danh sách">
+                  <Tooltip title="Dán danh sách hàng từ Excel">
+                    <Button
+                      type="dashed"
+                      onClick={handleBulkPasteOpen}
+                      icon={<CopyOutlined />}
+                      style={{ color: '#1677ff', borderColor: '#1677ff' }}
+                    >
+                      Dán từ Excel
+                    </Button>
+                  </Tooltip>
+                  <Tooltip title="Tạo nguyên liệu, vật tư hoặc dụng cụ mới">
                     <Button
                       type="dashed"
                       onClick={handleOpenDrawer}
                       icon={<PlusOutlined />}
                       style={{ color: '#8B6914', borderColor: '#8B6914' }}
                     >
-                      Tạo NL mới
+                      Tạo mới
                     </Button>
                   </Tooltip>
                 </div>
@@ -1239,7 +1647,7 @@ export default function PurchaseOrdersPage() {
                 if (!item) return sum;
                 return sum + (item.quantity || 0) * (item.unitPrice || 0);
               }, 0);
-              const itemCount = items.filter((i: any) => i?.ingredientId).length;
+              const itemCount = items.filter((i: any) => i?.ingredientId || i?.supplyId || i?.equipmentId).length;
 
               if (itemCount === 0) return null;
 
@@ -1256,7 +1664,7 @@ export default function PurchaseOrdersPage() {
                   }}
                 >
                   <Text style={{ color: '#666' }}>
-                    {itemCount} nguyên liệu
+                    {itemCount} mặt hàng
                   </Text>
                   <div style={{ textAlign: 'right' }}>
                     <Text style={{ color: '#666', fontSize: 12 }}>Tổng ước tính</Text>
@@ -1271,9 +1679,9 @@ export default function PurchaseOrdersPage() {
         </Form>
       </Modal>
 
-      {/* ============ Drawer: Tạo nguyên liệu nhanh ============ */}
+      {/* ============ Drawer: Tạo nguyên liệu / vật tư / dụng cụ nhanh ============ */}
       <Drawer
-        title="Tạo nguyên liệu mới"
+        title={`Tạo ${drawerCategoryLabels[drawerCategory]} mới`}
         placement="right"
         width={420}
         open={drawerOpen}
@@ -1282,6 +1690,7 @@ export default function PurchaseOrdersPage() {
           drawerForm.resetFields();
           setDrawerImageList([]);
           setDrawerImageUrl('');
+          setDrawerCategory('ingredient');
         }}
         extra={
           <Button
@@ -1290,40 +1699,111 @@ export default function PurchaseOrdersPage() {
             loading={drawerSubmitting}
             style={{ backgroundColor: '#8B6914' }}
           >
-            Tạo nguyên liệu
+            Tạo {drawerCategoryLabels[drawerCategory]}
           </Button>
         }
       >
+        {/* Chọn loại */}
+        <div style={{ marginBottom: 16 }}>
+          <Segmented
+            block
+            value={drawerCategory}
+            onChange={handleDrawerCategoryChange}
+            options={drawerCategorySegments}
+          />
+        </div>
+
         <Alert
-          message="Nguyên liệu mới sẽ xuất hiện ngay trong danh sách chọn của phiếu nhập."
+          message={
+            drawerCategory === 'ingredient'
+              ? 'Nguyên liệu mới sẽ xuất hiện ngay trong danh sách chọn của phiếu nhập.'
+              : drawerCategory === 'supply'
+              ? 'Vật tư mới sẽ xuất hiện trong mục Vật tư tiêu hao.'
+              : 'Dụng cụ mới sẽ xuất hiện trong mục Dụng cụ.'
+          }
           type="info"
           showIcon
           style={{ marginBottom: 16 }}
         />
 
         <Form form={drawerForm} layout="vertical" onFinish={handleDrawerSubmit}>
-          <Form.Item name="name" label="Tên nguyên liệu" rules={[{ required: true, message: 'Nhập tên' }]}>
-            <Input placeholder="VD: Bột mì, Đường, Bơ..." />
+          {/* Tên - chung cho tất cả */}
+          <Form.Item
+            name="name"
+            label={`Tên ${drawerCategoryLabels[drawerCategory]}`}
+            rules={[{ required: true, message: 'Nhập tên' }]}
+          >
+            <Input placeholder={
+              drawerCategory === 'ingredient' ? 'VD: Bột mì, Đường, Bơ...' :
+              drawerCategory === 'supply' ? 'VD: Hộp đựng bánh, Túi zip...' :
+              'VD: Khuôn bánh, Máy đánh trứng...'
+            } />
           </Form.Item>
 
-          <Form.Item name="unit" label="Đơn vị tính" rules={[{ required: true, message: 'Chọn đơn vị' }]}>
-            <Select options={unitOptions} placeholder="Chọn đơn vị" />
-          </Form.Item>
+          {/* === Fields cho Nguyên liệu === */}
+          {drawerCategory === 'ingredient' && (
+            <>
+              <Form.Item name="unit" label="Đơn vị tính" rules={[{ required: true, message: 'Chọn đơn vị' }]}>
+                <Select options={unitOptions} placeholder="Chọn đơn vị" />
+              </Form.Item>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <Form.Item name="currentStock" label="Tồn kho hiện tại" initialValue={0} style={{ flex: 1 }}>
+                  <InputNumber style={{ width: '100%' }} min={0} />
+                </Form.Item>
+                <Form.Item name="minStock" label="Tồn kho tối thiểu" initialValue={0} style={{ flex: 1 }}>
+                  <InputNumber style={{ width: '100%' }} min={0} />
+                </Form.Item>
+              </div>
+              <Form.Item name="costPerUnit" label="Giá mỗi đơn vị (VNĐ)" initialValue={0}>
+                <InputNumber style={{ width: '100%' }} min={0} step={100} />
+              </Form.Item>
+            </>
+          )}
 
-          <div style={{ display: 'flex', gap: 12 }}>
-            <Form.Item name="currentStock" label="Tồn kho hiện tại" initialValue={0} style={{ flex: 1 }}>
-              <InputNumber style={{ width: '100%' }} min={0} />
-            </Form.Item>
-            <Form.Item name="minStock" label="Tồn kho tối thiểu" initialValue={0} style={{ flex: 1 }}>
-              <InputNumber style={{ width: '100%' }} min={0} />
-            </Form.Item>
-          </div>
+          {/* === Fields cho Vật tư tiêu hao === */}
+          {drawerCategory === 'supply' && (
+            <>
+              <Form.Item name="unit" label="Đơn vị tính" rules={[{ required: true, message: 'Chọn đơn vị' }]}>
+                <Select options={supplyUnitOptions} placeholder="Chọn đơn vị" />
+              </Form.Item>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <Form.Item name="currentStock" label="Tồn kho hiện tại" initialValue={0} style={{ flex: 1 }}>
+                  <InputNumber style={{ width: '100%' }} min={0} />
+                </Form.Item>
+                <Form.Item name="minStock" label="Tồn kho tối thiểu" initialValue={0} style={{ flex: 1 }}>
+                  <InputNumber style={{ width: '100%' }} min={0} />
+                </Form.Item>
+              </div>
+              <Form.Item name="costPerUnit" label="Giá mỗi đơn vị (VNĐ)" initialValue={0}>
+                <InputNumber style={{ width: '100%' }} min={0} step={100} />
+              </Form.Item>
+              <Form.Item name="notes" label="Ghi chú">
+                <Input.TextArea rows={2} placeholder="Ghi chú thêm (không bắt buộc)" />
+              </Form.Item>
+            </>
+          )}
 
-          <Form.Item name="costPerUnit" label="Giá mỗi đơn vị (VNĐ)" initialValue={0}>
-            <InputNumber style={{ width: '100%' }} min={0} step={100} />
-          </Form.Item>
+          {/* === Fields cho Dụng cụ === */}
+          {drawerCategory === 'equipment' && (
+            <>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <Form.Item name="quantity" label="Số lượng" initialValue={1} style={{ flex: 1 }} rules={[{ required: true, message: 'Nhập SL' }]}>
+                  <InputNumber style={{ width: '100%' }} min={1} />
+                </Form.Item>
+                <Form.Item name="condition" label="Tình trạng" initialValue="good" style={{ flex: 1 }} rules={[{ required: true, message: 'Chọn tình trạng' }]}>
+                  <Select options={conditionOptions} />
+                </Form.Item>
+              </div>
+              <Form.Item name="purchasePrice" label="Giá mua (VNĐ)" initialValue={0}>
+                <InputNumber style={{ width: '100%' }} min={0} step={1000} />
+              </Form.Item>
+              <Form.Item name="notes" label="Ghi chú">
+                <Input.TextArea rows={2} placeholder="Ghi chú thêm (không bắt buộc)" />
+              </Form.Item>
+            </>
+          )}
 
-          {/* Upload ảnh */}
+          {/* Upload ảnh - chung cho tất cả */}
           <Form.Item label={`Hình ảnh (${drawerImageList.length}/3)`}>
             <Upload
               accept="image/*"
@@ -1354,7 +1834,7 @@ export default function PurchaseOrdersPage() {
                   >
                     <Image
                       src={getFullImageUrl(url)}
-                      alt="NL"
+                      alt="img"
                       width={72}
                       height={72}
                       style={{ borderRadius: 6, objectFit: 'cover' }}
@@ -1395,6 +1875,303 @@ export default function PurchaseOrdersPage() {
           <Form.Item name="images" hidden><Input /></Form.Item>
         </Form>
       </Drawer>
+
+      {/* ============ Modal: Dán từ Excel ============ */}
+      <Modal
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <CopyOutlined style={{ color: '#1677ff' }} />
+            <span>Dán từ Excel</span>
+          </div>
+        }
+        open={bulkPasteOpen}
+        onCancel={() => setBulkPasteOpen(false)}
+        width={isMobile ? '100%' : (bulkPasteStep === 0 ? 520 : 900)}
+        style={isMobile ? { top: 16, maxWidth: '100vw', paddingBottom: 0 } : undefined}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+            {bulkPasteStep === 0 ? (
+              <>
+                <Button onClick={() => setBulkPasteOpen(false)}>Huỷ</Button>
+                <Button type="primary" onClick={handleBulkPasteParse} block={isMobile}>Xem trước</Button>
+              </>
+            ) : (
+              <>
+                <Button onClick={() => setBulkPasteStep(0)}>← Quay lại</Button>
+                <Button
+                  type="primary"
+                  onClick={handleBulkPasteAddToForm}
+                  disabled={bulkPasteSelectedCount === 0}
+                  block={isMobile}
+                >
+                  Thêm {bulkPasteSelectedCount} mục vào phiếu
+                </Button>
+              </>
+            )}
+          </div>
+        }
+      >
+        <Steps
+          current={bulkPasteStep}
+          size="small"
+          direction={isMobile ? 'vertical' : 'horizontal'}
+          style={{ marginBottom: 16 }}
+          items={[{ title: 'Dán dữ liệu' }, { title: 'Xem trước & chọn' }]}
+        />
+
+        {bulkPasteStep === 0 ? (
+          <>
+            {/* Hướng dẫn nhanh */}
+            <div style={{ marginBottom: 14, padding: '12px 14px', background: '#f0f7ff', borderRadius: 10, border: '1px solid #bad6ff' }}>
+              <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 14 }}>
+                Hướng dẫn nhanh
+              </div>
+
+              {/* Các bước */}
+              <div style={{ fontSize: 13, color: '#333', lineHeight: 1.8, marginBottom: 12 }}>
+                <div><strong>1.</strong> Mở file Excel chứa danh sách hàng cần nhập</div>
+                <div><strong>2.</strong> Bôi đen các dòng, bấm <Tag style={{ fontSize: 11, padding: '0 6px', margin: '0 2px' }}>Ctrl+C</Tag></div>
+                <div><strong>3.</strong> Bấm vào ô bên dưới, bấm <Tag style={{ fontSize: 11, padding: '0 6px', margin: '0 2px' }}>Ctrl+V</Tag></div>
+              </div>
+
+              {/* Format hỗ trợ */}
+              <div style={{ fontSize: 12, color: '#555', marginBottom: 8 }}>
+                <strong>Format hỗ trợ:</strong> Tên | Số lượng | Đơn giá | <span style={{ color: '#1677ff' }}>Loại</span>
+              </div>
+
+              {/* Loại */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                <Tag color="blue" style={{ fontSize: 11 }}><strong>NL</strong> = Nguyên liệu</Tag>
+                <Tag color="orange" style={{ fontSize: 11 }}><strong>VT</strong> = Vật tư</Tag>
+                <Tag color="green" style={{ fontSize: 11 }}><strong>DC</strong> = Dụng cụ</Tag>
+              </div>
+
+              {/* Bảng ví dụ */}
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, color: '#555' }}>Ví dụ:</div>
+              <div style={{ overflowX: 'auto', background: '#1e1e1e', borderRadius: 6, padding: '8px 10px', fontFamily: 'monospace', fontSize: 11, color: '#d4d4d4', lineHeight: 1.7, whiteSpace: 'pre' }}>
+{`Baking soda - 100g   5     28,000   NL
+Cuộn mica bao bánh   2     61,000   VT
+Bộ muỗng đo lường    1     30,000   DC
+Bánh Marie 120g      10    15,000`}
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, flexWrap: 'wrap', gap: 6 }}>
+                <div style={{ fontSize: 11, color: '#888' }}>
+                  Cột Loại & STT không bắt buộc. Dòng tiêu đề tự bỏ qua.
+                </div>
+                <Button
+                  size="small"
+                  type="link"
+                  style={{ fontSize: 11, padding: 0 }}
+                  onClick={() => setBulkPasteText(`Baking soda - 100g\t5\t28000\tNL\nCuộn mica bao bánh 6cm - 1kg\t2\t61000\tVT\nBộ muỗng đo lường\t1\t30000\tDC\nBánh Marie 120g\t10\t15000\nSữa tươi 1L\t5\t32000\tNL`)}
+                >
+                  Dán dữ liệu mẫu
+                </Button>
+              </div>
+            </div>
+
+            {/* Textarea */}
+            <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 4, color: '#666' }}>
+              Dán dữ liệu vào đây:
+            </div>
+            <Input.TextArea
+              rows={isMobile ? 6 : 8}
+              placeholder="Dán dữ liệu từ Excel vào đây..."
+              value={bulkPasteText}
+              onChange={(e) => setBulkPasteText(e.target.value)}
+              style={{ fontFamily: 'monospace', fontSize: 13 }}
+            />
+          </>
+        ) : (
+          <>
+            {bulkPasteUnmatchedCount > 0 && (
+              <Alert
+                message={`${bulkPasteUnmatchedCount} mục không tìm thấy trong kho.`}
+                type="warning"
+                showIcon
+                style={{ marginBottom: 12 }}
+              />
+            )}
+            <div style={{ marginBottom: 8 }}>
+              <Checkbox
+                checked={bulkPasteRows.filter((r) => r.matchScore !== 'none').every((r) => r.selected)}
+                indeterminate={
+                  bulkPasteRows.filter((r) => r.matchScore !== 'none').some((r) => r.selected) &&
+                  !bulkPasteRows.filter((r) => r.matchScore !== 'none').every((r) => r.selected)
+                }
+                onChange={(e) => handleBulkPasteToggleAll(e.target.checked)}
+              >
+                Chọn tất cả ({bulkPasteSelectedCount}/{bulkPasteRows.filter((r) => r.matchScore !== 'none').length})
+              </Checkbox>
+            </div>
+
+            {/* Mobile: card list */}
+            {isMobile ? (
+              <div style={{ maxHeight: '55vh', overflowY: 'auto' }}>
+                {bulkPasteRows.map((record) => {
+                  const catInfo = bulkCategoryLabels[record.category];
+                  const isDisabled = record.matchScore === 'none' && !record.matchedId;
+                  return (
+                    <div
+                      key={record.key}
+                      style={{
+                        padding: '10px 12px',
+                        marginBottom: 8,
+                        background: record.selected && !isDisabled ? '#fff' : '#fafafa',
+                        border: `1px solid ${record.selected && !isDisabled ? '#d9d9d9' : '#f0f0f0'}`,
+                        borderRadius: 8,
+                        opacity: isDisabled ? 0.5 : 1,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                        <Checkbox
+                          checked={record.selected}
+                          disabled={isDisabled}
+                          onChange={() => handleBulkPasteToggleRow(record.key)}
+                        />
+                        <div style={{ flex: 1, fontWeight: 500, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {record.name}
+                        </div>
+                        <Tag color={catInfo.color} style={{ margin: 0, fontSize: 11 }}>{catInfo.tag}</Tag>
+                      </div>
+                      {/* Match status */}
+                      <div style={{ marginBottom: 6, paddingLeft: 30 }}>
+                        <Select
+                          size="small"
+                          placeholder="Chọn mặt hàng..."
+                          showSearch
+                          optionFilterProp="label"
+                          options={
+                            record.category === 'ingredient' ? ingredients.map((i) => ({ value: i.id, label: i.name })) :
+                            record.category === 'supply' ? allSupplies.map((s) => ({ value: s.id, label: s.name })) :
+                            allEquipment.map((e) => ({ value: e.id, label: e.name }))
+                          }
+                          style={{ width: '100%' }}
+                          value={record.matchedId || undefined}
+                          onChange={(val) => handleBulkPasteChangeMatch(record.key, val, record.category)}
+                          allowClear
+                          status={record.matchScore === 'none' && !record.matchedId ? 'warning' : undefined}
+                        />
+                        {record.matchScore === 'exact' && (
+                          <div style={{ fontSize: 11, color: '#52c41a', marginTop: 2 }}>✅ Khớp chính xác</div>
+                        )}
+                        {record.matchScore === 'partial' && (
+                          <div style={{ fontSize: 11, color: '#faad14', marginTop: 2 }}>⚠️ Khớp gần đúng</div>
+                        )}
+                        {record.matchScore === 'none' && !record.matchedId && (
+                          <div style={{ fontSize: 11, color: '#ff4d4f', marginTop: 2 }}>❌ Chưa khớp</div>
+                        )}
+                      </div>
+                      {/* SL + Giá */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: 30, fontSize: 12, color: '#666' }}>
+                        <span>SL: {record.quantity.toLocaleString('vi-VN')} × {formatCurrency(record.unitPrice)}</span>
+                        <strong style={{ color: '#8B6914' }}>{formatCurrency(record.quantity * record.unitPrice)}</strong>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              /* Desktop: table */
+              <Table
+                dataSource={bulkPasteRows}
+                rowKey="key"
+                pagination={false}
+                size="small"
+                scroll={{ y: 400 }}
+                columns={[
+                  {
+                    title: '',
+                    key: 'selected',
+                    width: 40,
+                    render: (_: any, record: BulkPasteRow) => (
+                      <Checkbox
+                        checked={record.selected}
+                        disabled={record.matchScore === 'none' && !record.matchedId}
+                        onChange={() => handleBulkPasteToggleRow(record.key)}
+                      />
+                    ),
+                  },
+                  {
+                    title: 'Tên (từ Excel)',
+                    dataIndex: 'name',
+                    width: 180,
+                    ellipsis: true,
+                  },
+                  {
+                    title: 'Loại',
+                    dataIndex: 'category',
+                    width: 60,
+                    render: (cat: BulkItemCategory) => {
+                      const c = bulkCategoryLabels[cat];
+                      return <Tag color={c.color} style={{ margin: 0 }}>{c.tag}</Tag>;
+                    },
+                  },
+                  {
+                    title: 'Khớp với',
+                    key: 'match',
+                    width: 240,
+                    render: (_: any, record: BulkPasteRow) => {
+                      const options = record.category === 'ingredient'
+                        ? ingredients.map((i) => ({ value: i.id, label: i.name }))
+                        : record.category === 'supply'
+                        ? allSupplies.map((s) => ({ value: s.id, label: s.name }))
+                        : allEquipment.map((e) => ({ value: e.id, label: e.name }));
+                      return (
+                        <div>
+                          <Select
+                            size="small"
+                            placeholder="Chọn mặt hàng..."
+                            showSearch
+                            optionFilterProp="label"
+                            options={options}
+                            style={{ width: '100%' }}
+                            value={record.matchedId || undefined}
+                            onChange={(val) => handleBulkPasteChangeMatch(record.key, val, record.category)}
+                            allowClear
+                            status={record.matchScore === 'none' && !record.matchedId ? 'warning' : undefined}
+                          />
+                          {record.matchScore === 'exact' && (
+                            <div style={{ fontSize: 11, color: '#52c41a', marginTop: 2 }}>✅ Khớp chính xác</div>
+                          )}
+                          {record.matchScore === 'partial' && (
+                            <div style={{ fontSize: 11, color: '#faad14', marginTop: 2 }}>⚠️ Khớp gần đúng</div>
+                          )}
+                          {record.matchScore === 'none' && !record.matchedId && (
+                            <div style={{ fontSize: 11, color: '#ff4d4f', marginTop: 2 }}>❌ Chưa khớp — chọn thủ công</div>
+                          )}
+                        </div>
+                      );
+                    },
+                  },
+                  {
+                    title: 'SL',
+                    dataIndex: 'quantity',
+                    width: 65,
+                    render: (v: number) => v.toLocaleString('vi-VN'),
+                  },
+                  {
+                    title: 'Đơn giá',
+                    dataIndex: 'unitPrice',
+                    width: 95,
+                    render: (v: number) => formatCurrency(v),
+                  },
+                  {
+                    title: 'Thành tiền',
+                    key: 'subtotal',
+                    width: 105,
+                    render: (_: any, record: BulkPasteRow) => (
+                      <strong style={{ color: '#8B6914' }}>
+                        {formatCurrency(record.quantity * record.unitPrice)}
+                      </strong>
+                    ),
+                  },
+                ]}
+              />
+            )}
+          </>
+        )}
+      </Modal>
 
       {/* ============ Modal hướng dẫn trạng thái ============ */}
       <Modal
@@ -1475,36 +2252,52 @@ export default function PurchaseOrdersPage() {
                 <strong style={{ color: '#8B6914' }}>{formatCurrency(selectedPO.totalCost)}</strong>
               </Descriptions.Item>
             </Descriptions>
-            <Divider>Nguyên liệu</Divider>
+            <Divider>Danh sách hàng nhập</Divider>
             {isMobile ? (
               /* Mobile: Card list */
               <>
-                {selectedPO.items.map((item: any) => (
-                  <div key={item.id} style={{
-                    background: '#fafafa',
-                    border: '1px solid #f0f0f0',
-                    borderRadius: 8,
-                    padding: '10px 12px',
-                    marginBottom: 8,
-                  }}>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
-                      <img
-                        src={getFullImageUrl(item.ingredient?.imageUrl) || PLACEHOLDER_IMG}
-                        alt=""
-                        style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }}
-                        onError={(e) => { (e.target as HTMLImageElement).src = PLACEHOLDER_IMG; }}
-                      />
-                      <div style={{ flex: 1 }}>
-                        <strong style={{ fontSize: 13 }}>{item.ingredient?.name}</strong>
-                        <Tag style={{ marginLeft: 6, fontSize: 10 }}>{item.ingredient?.unit}</Tag>
+                {selectedPO.items.map((item: any) => {
+                  const itemType = item.itemType || 'ingredient';
+                  const itemName = itemType === 'ingredient' ? item.ingredient?.name
+                    : itemType === 'supply' ? item.supply?.name
+                    : item.equipment?.name;
+                  const itemUnit = itemType === 'ingredient' ? item.ingredient?.unit
+                    : itemType === 'supply' ? item.supply?.unit
+                    : 'cái';
+                  const imgUrl = itemType === 'ingredient' ? item.ingredient?.imageUrl
+                    : itemType === 'supply' ? item.supply?.imageUrl
+                    : item.equipment?.imageUrl;
+                  const typeTag = itemType === 'ingredient' ? { label: 'NL', color: 'blue' }
+                    : itemType === 'supply' ? { label: 'VT', color: 'orange' }
+                    : { label: 'DC', color: 'green' };
+                  return (
+                    <div key={item.id} style={{
+                      background: '#fafafa',
+                      border: '1px solid #f0f0f0',
+                      borderRadius: 8,
+                      padding: '10px 12px',
+                      marginBottom: 8,
+                    }}>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                        <img
+                          src={getFullImageUrl(imgUrl) || PLACEHOLDER_IMG}
+                          alt=""
+                          style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }}
+                          onError={(e) => { (e.target as HTMLImageElement).src = PLACEHOLDER_IMG; }}
+                        />
+                        <div style={{ flex: 1 }}>
+                          <Tag color={typeTag.color} style={{ fontSize: 10 }}>{typeTag.label}</Tag>
+                          <strong style={{ fontSize: 13 }}>{itemName}</strong>
+                          <Tag style={{ marginLeft: 6, fontSize: 10 }}>{itemUnit}</Tag>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#666' }}>
+                        <span>{Number(item.quantity).toLocaleString()} × {formatCurrency(item.unitPrice)}</span>
+                        <strong style={{ color: '#8B6914' }}>{formatCurrency(item.subtotal)}</strong>
                       </div>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#666' }}>
-                      <span>{Number(item.quantity).toLocaleString()} × {formatCurrency(item.unitPrice)}</span>
-                      <strong style={{ color: '#8B6914' }}>{formatCurrency(item.subtotal)}</strong>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </>
             ) : (
               <Table
@@ -1517,17 +2310,50 @@ export default function PurchaseOrdersPage() {
                     title: 'Ảnh',
                     key: 'image',
                     width: 50,
-                    render: (_: any, record: any) => (
-                      <img
-                        src={getFullImageUrl(record.ingredient?.imageUrl) || PLACEHOLDER_IMG}
-                        alt=""
-                        style={{ width: 32, height: 32, borderRadius: 4, objectFit: 'cover' }}
-                        onError={(e) => { (e.target as HTMLImageElement).src = PLACEHOLDER_IMG; }}
-                      />
-                    ),
+                    render: (_: any, record: any) => {
+                      const itemType = record.itemType || 'ingredient';
+                      const imgUrl = itemType === 'ingredient' ? record.ingredient?.imageUrl
+                        : itemType === 'supply' ? record.supply?.imageUrl
+                        : record.equipment?.imageUrl;
+                      return (
+                        <img
+                          src={getFullImageUrl(imgUrl) || PLACEHOLDER_IMG}
+                          alt=""
+                          style={{ width: 32, height: 32, borderRadius: 4, objectFit: 'cover' }}
+                          onError={(e) => { (e.target as HTMLImageElement).src = PLACEHOLDER_IMG; }}
+                        />
+                      );
+                    },
                   },
-                  { title: 'Nguyên liệu', dataIndex: ['ingredient', 'name'] },
-                  { title: 'Đơn vị', dataIndex: ['ingredient', 'unit'] },
+                  {
+                    title: 'Tên',
+                    key: 'name',
+                    render: (_: any, record: any) => {
+                      const itemType = record.itemType || 'ingredient';
+                      const name = itemType === 'ingredient' ? record.ingredient?.name
+                        : itemType === 'supply' ? record.supply?.name
+                        : record.equipment?.name;
+                      const typeTag = itemType === 'ingredient' ? { label: 'NL', color: 'blue' }
+                        : itemType === 'supply' ? { label: 'VT', color: 'orange' }
+                        : { label: 'DC', color: 'green' };
+                      return (
+                        <span>
+                          <Tag color={typeTag.color} style={{ fontSize: 10 }}>{typeTag.label}</Tag>
+                          {name || '—'}
+                        </span>
+                      );
+                    },
+                  },
+                  {
+                    title: 'Đơn vị',
+                    key: 'unit',
+                    render: (_: any, record: any) => {
+                      const itemType = record.itemType || 'ingredient';
+                      if (itemType === 'ingredient') return record.ingredient?.unit || '';
+                      if (itemType === 'supply') return record.supply?.unit || '';
+                      return 'cái';
+                    },
+                  },
                   { title: 'Số lượng', dataIndex: 'quantity', render: (v: number) => Number(v).toLocaleString() },
                   { title: 'Đơn giá', dataIndex: 'unitPrice', render: (v: number) => formatCurrency(v) },
                   { title: 'Thành tiền', dataIndex: 'subtotal', render: (v: number) => formatCurrency(v) },
