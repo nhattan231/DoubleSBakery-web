@@ -50,8 +50,10 @@ export interface Ingredient {
 // ========== Recipe Types ==========
 export interface RecipeItem {
   id: string;
-  ingredientId: string;
-  ingredient: Ingredient;
+  ingredientId?: string | null;
+  ingredient?: Ingredient | null;
+  supplyId?: string | null;
+  supply?: Supply | null;
   quantity: number;
 }
 
@@ -96,6 +98,7 @@ export interface Order {
   totalAmount: number;
   notes?: string;
   deductStock: boolean;
+  orderDate?: string;
   items: OrderItem[];
   supplyItems?: OrderSupplyItem[];
   createdAt: string;
@@ -154,7 +157,8 @@ export interface InventoryTransaction {
 
 // ========== Production Estimate ==========
 export interface EstimateIngredient {
-  ingredientId: string;
+  ingredientId?: string;
+  supplyId?: string;
   ingredientName: string;
   unit: string;
   totalNeeded: number;

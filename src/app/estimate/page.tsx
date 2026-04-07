@@ -166,12 +166,13 @@ export default function EstimatePage() {
 
   const ingredientColumns = [
     {
-      title: 'Nguyên liệu',
+      title: 'Nguyên liệu / Vật tư',
       dataIndex: 'ingredientName',
       key: 'ingredientName',
       render: (name: string, record: any) => (
         <span>
           {name}
+          {record.supplyId && <Tag color="orange" style={{ marginLeft: 6, fontSize: 10 }}>Vật tư</Tag>}
           {record.shortage > 0 && (
             <WarningOutlined style={{ marginLeft: 6, color: '#ff4d4f' }} />
           )}
@@ -478,7 +479,7 @@ export default function EstimatePage() {
                 /* Mobile: Card list */
                 <>
                   {result.ingredients.map((ing: any) => (
-                    <div key={ing.ingredientId} style={{
+                    <div key={ing.ingredientId || ing.supplyId} style={{
                       background: ing.shortage > 0 ? '#fff2f0' : '#fafafa',
                       border: `1px solid ${ing.shortage > 0 ? '#ffccc7' : '#f0f0f0'}`,
                       borderRadius: 8,
@@ -489,6 +490,7 @@ export default function EstimatePage() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <strong style={{ fontSize: 13 }}>{ing.ingredientName}</strong>
                           <Tag style={{ margin: 0, fontSize: 10 }}>{ing.unit}</Tag>
+                          {ing.supplyId && <Tag color="orange" style={{ margin: 0, fontSize: 10 }}>Vật tư</Tag>}
                         </div>
                         {ing.shortage > 0 ? (
                           <Tag color="red" style={{ margin: 0, fontSize: 11 }}>-{Number(ing.shortage).toLocaleString()}</Tag>
@@ -512,7 +514,7 @@ export default function EstimatePage() {
                 <Table
                   columns={ingredientColumns}
                   dataSource={result.ingredients}
-                  rowKey="ingredientId"
+                  rowKey={(record: any) => record.ingredientId || record.supplyId}
                   pagination={false}
                   size="small"
                   scroll={{ x: 700 }}

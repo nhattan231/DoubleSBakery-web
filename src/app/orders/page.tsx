@@ -83,8 +83,8 @@ export default function OrdersPage() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [orderEstimate, setOrderEstimate] = useState<EstimateHistoryItem | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
-  const [datePreset, setDatePreset] = useState<DatePreset>('all');
-  const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
+  const [datePreset, setDatePreset] = useState<DatePreset>('today');
+  const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(getDateRange('today'));
   const [searchText, setSearchText] = useState('');
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
@@ -186,6 +186,7 @@ export default function OrdersPage() {
         address: values.address,
         notes: values.notes,
         deductStock: values.deductStock !== false,
+        orderDate: values.orderDate ? values.orderDate.format('YYYY-MM-DD') : undefined,
         items: [...normalItems, ...giftItems],
         supplyItems: supplyItemsPayload,
       };
@@ -292,9 +293,8 @@ export default function OrdersPage() {
     },
     {
       title: 'Ngày tạo',
-      dataIndex: 'createdAt',
       key: 'createdAt',
-      render: (d: string) => formatDateTime(d),
+      render: (_: any, record: any) => formatDateTime(record.orderDate || record.createdAt),
     },
     {
       title: 'Thao tác',
@@ -459,7 +459,7 @@ export default function OrdersPage() {
                       </div>
                       {/* Row 3: Ngày + Tổng tiền */}
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                        <span style={{ fontSize: 12, color: '#999' }}>{formatDateTime(order.createdAt)}</span>
+                        <span style={{ fontSize: 12, color: '#999' }}>{formatDateTime(order.orderDate || order.createdAt)}</span>
                         <strong style={{ fontSize: 15, color: '#8B6914' }}>{formatCurrency(order.totalAmount)}</strong>
                       </div>
                       {/* Row 4: Buttons */}
@@ -573,6 +573,10 @@ export default function OrdersPage() {
 
           <Form.Item name="notes" label="Ghi chú">
             <Input.TextArea rows={2} placeholder="Ghi chú cho đơn hàng (tuỳ chọn)" />
+          </Form.Item>
+
+          <Form.Item name="orderDate" label="Ngày tạo đơn" initialValue={dayjs()}>
+            <DatePicker format="DD/MM/YYYY" style={{ width: '100%' }} allowClear={false} placeholder="Chọn ngày tạo đơn" />
           </Form.Item>
 
           {/* Toggle xuất kho toàn đơn */}
@@ -1193,7 +1197,7 @@ export default function OrdersPage() {
                   {formatCurrency(selectedOrder.totalAmount)}
                 </strong>
               </Descriptions.Item>
-              <Descriptions.Item label="Ngày tạo">{formatDateTime(selectedOrder.createdAt)}</Descriptions.Item>
+              <Descriptions.Item label="Ngày tạo đơn">{formatDateTime(selectedOrder.orderDate || selectedOrder.createdAt)}</Descriptions.Item>
               <Descriptions.Item label="Xuất kho">
                 {selectedOrder.deductStock !== false
                   ? <Tag color="green">Có xuất kho</Tag>

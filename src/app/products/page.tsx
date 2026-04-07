@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useProductsQuery, useAllIngredientsQuery } from '@/lib/hooks';
+import { useProductsQuery, useAllIngredientsQuery, useAllSuppliesQuery } from '@/lib/hooks';
 import {
   Card,
   Table,
@@ -67,6 +67,7 @@ export default function ProductsPage() {
   const products: Product[] = productsQuery.data?.list || [];
   const loading = productsQuery.isLoading;
   const { data: ingredients = [] } = useAllIngredientsQuery();
+  const { data: supplies = [] } = useAllSuppliesQuery();
   const [showGuide, setShowGuide] = useState(false);
   const [detailProduct, setDetailProduct] = useState<any>(null);
   const [copiedFromSize, setCopiedFromSize] = useState<string | null>(null);
@@ -192,7 +193,8 @@ export default function ProductsPage() {
         recipeForm.setFieldsValue({
           notes: defaultRecipe.notes,
           items: defaultRecipe.items.map((item: any) => ({
-            ingredientId: item.ingredientId,
+            ingredientId: item.ingredientId || undefined,
+            supplyId: item.supplyId || undefined,
             quantity: Number(item.quantity),
           })),
         });
@@ -216,19 +218,20 @@ export default function ProductsPage() {
     const recipe = productRecipes.find((r: any) =>
       sizeId ? r.sizeId === sizeId : !r.sizeId,
     );
-    if (recipe) {
+    if (recipe && recipe.items?.length > 0) {
       recipeForm.setFieldsValue({
         notes: recipe.notes,
         items: recipe.items.map((item: any) => ({
-          ingredientId: item.ingredientId,
+          ingredientId: item.ingredientId || undefined,
+          supplyId: item.supplyId || undefined,
           quantity: Number(item.quantity),
         })),
       });
     } else {
       // Tìm công thức mẫu: ưu tiên Mặc định → bất kỳ size nào có công thức
       const templateRecipe =
-        productRecipes.find((r: any) => !r.sizeId) ||
-        productRecipes[0];
+        productRecipes.find((r: any) => !r.sizeId && r.items?.length > 0) ||
+        productRecipes.find((r: any) => r.items?.length > 0);
       if (templateRecipe && templateRecipe.items?.length > 0) {
         const templateSizeName = !templateRecipe.sizeId
           ? 'Mặc định'
@@ -236,8 +239,12 @@ export default function ProductsPage() {
         recipeForm.setFieldsValue({
           notes: templateRecipe.notes,
           items: templateRecipe.items.map((item: any) => ({
-            ingredientId: item.ingredientId,
-            quantity: Math.round(Number(item.quantity) * 2 * 1000) / 1000,
+            ingredientId: item.ingredientId || undefined,
+            supplyId: item.supplyId || undefined,
+            // Nguyên liệu x2, vật tư giữ nguyên
+            quantity: item.supplyId
+              ? Number(item.quantity)
+              : Math.round(Number(item.quantity) * 2 * 1000) / 1000,
           })),
         });
         setCopiedFromSize(templateSizeName);
@@ -253,15 +260,25 @@ export default function ProductsPage() {
       sizeId ? r.sizeId === sizeId : !r.sizeId,
     );
 
+    // Clean items: chỉ gửi ingredientId hoặc supplyId (không cả 2)
+    const cleanValues = {
+      ...values,
+      items: (values.items || []).map((item: any) => ({
+        quantity: item.quantity,
+        ...(item.ingredientId ? { ingredientId: item.ingredientId } : {}),
+        ...(item.supplyId ? { supplyId: item.supplyId } : {}),
+      })),
+    };
+
     try {
       if (existingRecipe) {
-        await recipesApi.update(existingRecipe.id, values);
+        await recipesApi.update(existingRecipe.id, cleanValues);
         message.success('Cập nhật công thức thành công');
       } else {
         await recipesApi.create({
           productId: selectedProduct.id,
           sizeId,
-          ...values,
+          ...cleanValues,
         });
         message.success('Tạo công thức thành công');
       }
@@ -685,7 +702,7 @@ export default function ProductsPage() {
               : `📋 Size "${selectedProduct?.sizes?.find((s: any) => s.id === activeRecipeTab)?.name || ''}"`
             }
           </span>
-          {productRecipes.find((r: any) => activeRecipeTab === 'default' ? !r.sizeId : r.sizeId === activeRecipeTab)
+          {productRecipes.find((r: any) => (activeRecipeTab === 'default' ? !r.sizeId : r.sizeId === activeRecipeTab) && r.items?.length > 0)
             ? <Tag color="green" style={{ margin: 0 }}>Đã có</Tag>
             : <Tag color="orange" style={{ margin: 0 }}>Chưa có</Tag>
           }
@@ -694,10 +711,10 @@ export default function ProductsPage() {
         {copiedFromSize && (
           <div style={{ marginBottom: 12, padding: '10px 14px', background: '#FFF7E6', border: '1px solid #FFD591', borderRadius: 6, fontSize: 13 }}>
             <div style={{ fontWeight: 600, color: '#D46B08', marginBottom: 4 }}>
-              Dữ liệu tham khảo từ công thức "{copiedFromSize}" (x2 số lượng)
+              Dữ liệu tham khảo từ công thức "{copiedFromSize}"
             </div>
             <div style={{ color: '#8C6A1E' }}>
-              Số lượng nguyên liệu đã được nhân đôi so với công thức gốc. Bạn có thể chỉnh sửa lại cho phù hợp trước khi bấm "Lưu công thức".
+              Nguyên liệu đã được x2 số lượng, vật tư tiêu hao giữ nguyên. Bạn có thể chỉnh sửa lại cho phù hợp trước khi bấm "Lưu công thức".
             </div>
           </div>
         )}
@@ -709,57 +726,86 @@ export default function ProductsPage() {
 
           <Form.List name="items">
             {(fields, { add, remove }) => (
-              <>
-                {fields.map(({ key, name, ...restField }) => (
-                  <div key={key} className="recipe-ingredient-card" style={{
+              <Form.Item shouldUpdate={(prev, cur) => prev.items !== cur.items} noStyle>
+              {() => {
+              const allItems = recipeForm.getFieldValue('items') || [];
+              // Phân nhóm fields theo loại: dùng _type marker hoặc supplyId/ingredientId
+              const ingFields = fields.filter(({ name }) => {
+                const item = allItems[name];
+                return item?._type !== 'supply' && !item?.supplyId;
+              });
+              const supFields = fields.filter(({ name }) => {
+                const item = allItems[name];
+                return item?._type === 'supply' || !!item?.supplyId;
+              });
+
+              // Lấy tất cả ID đã chọn để loại khỏi dropdown
+              const selectedIngIds = allItems.filter((i: any) => i?.ingredientId).map((i: any) => i.ingredientId);
+              const selectedSupIds = allItems.filter((i: any) => i?.supplyId).map((i: any) => i.supplyId);
+
+              // Render 1 item card
+              const renderItemCard = (
+                { key, name, ...restField }: any,
+                type: 'ingredient' | 'supply',
+              ) => {
+                const isSupply = type === 'supply';
+                const borderColor = isSupply ? '#ffe7ba' : '#d6e4ff';
+                const bgColor = isSupply ? '#fffbe6' : '#f0f5ff';
+                const dataList = isSupply ? supplies : ingredients;
+                const selectedIds = isSupply ? selectedSupIds : selectedIngIds;
+                const fieldName = isSupply ? 'supplyId' : 'ingredientId';
+                const currentItem = allItems[name];
+                const currentId = currentItem?.[fieldName];
+
+                const options = dataList
+                  .filter((d) => !selectedIds.includes(d.id) || d.id === currentId)
+                  .map((d) => ({ value: d.id, label: `${d.name} - ${d.unit}`, imageUrl: d.imageUrl }));
+
+                return (
+                  <div key={key} style={{
                     marginBottom: 8,
-                    background: '#fafafa',
-                    border: '1px solid #f0f0f0',
+                    background: bgColor,
+                    border: `1px solid ${borderColor}`,
                     borderRadius: 8,
                     padding: '10px 12px',
                   }}>
-                    {/* Row 1: Select + Delete button */}
                     <div style={{ display: 'flex', gap: 8, alignItems: 'start', marginBottom: 8 }}>
                       <div style={{ flex: 1 }}>
-                        <Form.Item shouldUpdate={(prev, cur) => prev.items !== cur.items} noStyle>
-                        {() => {
-                          const allItems = recipeForm.getFieldValue('items') || [];
-                          const selectedIds = allItems
-                            .filter((_: any, idx: number) => idx !== name)
-                            .map((item: any) => item?.ingredientId)
-                            .filter(Boolean);
-                          return (
-                            <Form.Item {...restField} name={[name, 'ingredientId']} rules={[{ required: true, message: 'Chọn nguyên liệu' }]} style={{ marginBottom: 8 }}>
-                              <Select placeholder="Chọn nguyên liệu" style={{ width: '100%' }} showSearch optionFilterProp="label"
-                                options={ingredients
-                                  .filter((ing) => !selectedIds.includes(ing.id))
-                                  .map((ing) => ({ value: ing.id, label: `${ing.name} (${ing.unit})`, imageUrl: ing.imageUrl }))}
-                                optionRender={(option) => (
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    {(option.data as any).imageUrl ? (
-                                      <img src={getFullImageUrl((option.data as any).imageUrl)} alt="" width={24} height={24} style={{ borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
-                                    ) : (
-                                      <div style={{ width: 24, height: 24, borderRadius: 4, background: '#f0f0f0', flexShrink: 0 }} />
-                                    )}
-                                    <span>{option.label}</span>
-                                  </div>
+                        <Form.Item
+                          {...restField}
+                          name={[name, fieldName]}
+                          rules={[{ required: true, message: isSupply ? 'Chọn vật tư' : 'Chọn nguyên liệu' }]}
+                          style={{ marginBottom: 8 }}
+                        >
+                          <Select
+                            placeholder={isSupply ? 'Chọn vật tư tiêu hao' : 'Chọn nguyên liệu'}
+                            style={{ width: '100%' }}
+                            showSearch
+                            optionFilterProp="label"
+                            options={options}
+                            optionRender={(option) => (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                {(option.data as any).imageUrl ? (
+                                  <img src={getFullImageUrl((option.data as any).imageUrl)} alt="" width={24} height={24} style={{ borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
+                                ) : (
+                                  <div style={{ width: 24, height: 24, borderRadius: 4, background: isSupply ? '#ffe7ba' : '#d6e4ff', flexShrink: 0 }} />
                                 )}
-                                labelRender={(props) => {
-                                  const ing = ingredients.find((i) => i.id === props.value);
-                                  return (
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                      {ing?.imageUrl ? (
-                                        <img src={getFullImageUrl(ing.imageUrl)} alt="" width={20} height={20} style={{ borderRadius: 3, objectFit: 'cover', flexShrink: 0 }} />
-                                      ) : null}
-                                      <span>{props.label}</span>
-                                    </div>
-                                  );
-                                }}
-                              />
-                            </Form.Item>
-                          );
-                        }}
-                      </Form.Item>
+                                <span>{option.label}</span>
+                              </div>
+                            )}
+                            labelRender={(props) => {
+                              const found = dataList.find((d) => d.id === props.value);
+                              return (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  {found?.imageUrl ? (
+                                    <img src={getFullImageUrl(found.imageUrl)} alt="" width={20} height={20} style={{ borderRadius: 3, objectFit: 'cover', flexShrink: 0 }} />
+                                  ) : null}
+                                  <span>{found ? `${found.name} (${found.unit})` : props.label}</span>
+                                </div>
+                              );
+                            }}
+                          />
+                        </Form.Item>
                       </div>
                       <Button
                         danger
@@ -769,16 +815,66 @@ export default function ProductsPage() {
                         style={{ flexShrink: 0, marginTop: 4 }}
                       />
                     </div>
-                    {/* Row 2: Quantity */}
                     <Form.Item {...restField} name={[name, 'quantity']} rules={[{ required: true, message: 'Nhập số lượng' }]} label="Số lượng" style={{ marginBottom: 0 }}>
                       <InputNumber placeholder="Số lượng" min={0.001} style={{ width: '100%' }} />
                     </Form.Item>
                   </div>
-                ))}
-                <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
-                  Thêm nguyên liệu
-                </Button>
-              </>
+                );
+              };
+
+              return (
+                <>
+                  {/* ===== SECTION: Nguyên liệu ===== */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '6px 10px', background: '#e6f4ff', borderRadius: 6, border: '1px solid #91caff' }}>
+                      <span style={{ fontSize: 14 }}>🧂</span>
+                      <span style={{ fontWeight: 600, fontSize: 13, color: '#0958d9' }}>Nguyên liệu</span>
+                      <span style={{ fontSize: 12, color: '#4096ff', marginLeft: 'auto' }}>{ingFields.length} mục</span>
+                    </div>
+                    {ingFields.length === 0 && (
+                      <div style={{ textAlign: 'center', padding: '12px 0', color: '#bfbfbf', fontSize: 12 }}>
+                        Chưa có nguyên liệu
+                      </div>
+                    )}
+                    {ingFields.map((field) => renderItemCard(field, 'ingredient'))}
+                    <Button
+                      type="dashed"
+                      onClick={() => add({ _type: 'ingredient', quantity: undefined })}
+                      block
+                      icon={<PlusOutlined />}
+                      style={{ borderColor: '#91caff', color: '#1677ff' }}
+                    >
+                      Thêm nguyên liệu
+                    </Button>
+                  </div>
+
+                  {/* ===== SECTION: Vật tư tiêu hao ===== */}
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '6px 10px', background: '#fff7e6', borderRadius: 6, border: '1px solid #ffd591' }}>
+                      <span style={{ fontSize: 14 }}>📦</span>
+                      <span style={{ fontWeight: 600, fontSize: 13, color: '#d46b08' }}>Vật tư tiêu hao</span>
+                      <span style={{ fontSize: 12, color: '#fa8c16', marginLeft: 'auto' }}>{supFields.length} mục</span>
+                    </div>
+                    {supFields.length === 0 && (
+                      <div style={{ textAlign: 'center', padding: '12px 0', color: '#bfbfbf', fontSize: 12 }}>
+                        Chưa có vật tư
+                      </div>
+                    )}
+                    {supFields.map((field) => renderItemCard(field, 'supply'))}
+                    <Button
+                      type="dashed"
+                      onClick={() => add({ _type: 'supply', quantity: undefined })}
+                      block
+                      icon={<PlusOutlined />}
+                      style={{ borderColor: '#ffd591', color: '#fa8c16' }}
+                    >
+                      Thêm vật tư tiêu hao
+                    </Button>
+                  </div>
+                </>
+              );
+            }}
+            </Form.Item>
             )}
           </Form.List>
         </Form>
