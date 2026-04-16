@@ -444,6 +444,20 @@ function ItemRow({
           min={0.001}
           style={{ width: '100%' }}
           addonAfter={unit || '—'}
+          onChange={(val) => {
+            const items = form.getFieldValue('items') || [];
+            const item = items[name];
+            if (!item || !val) return;
+            const subtotal = item.subtotal;
+            const unitPrice = item.unitPrice;
+            if (subtotal && subtotal > 0) {
+              // Có thành tiền → tính lại đơn giá
+              form.setFieldValue(['items', name, 'unitPrice'], Math.round(subtotal / Number(val)));
+            } else if (unitPrice && unitPrice > 0) {
+              // Có đơn giá → tính lại thành tiền
+              form.setFieldValue(['items', name, 'subtotal'], Math.round(Number(val) * unitPrice));
+            }
+          }}
         />
       </Form.Item>
 
@@ -451,7 +465,7 @@ function ItemRow({
       <Form.Item
         {...rest}
         name={[name, 'unitPrice']}
-        rules={[{ required: true, message: 'Nhập giá' }]}
+        rules={[{ required: true, message: 'Nhập giá hoặc thành tiền' }]}
         style={{ width: 150, marginBottom: 8 }}
       >
         <InputNumber
@@ -462,36 +476,42 @@ function ItemRow({
           addonAfter="₫"
           formatter={(val) => val ? `${val}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''}
           parser={(val) => (val ? Number(val.replace(/,/g, '')) : 0) as any}
+          onChange={(val) => {
+            const items = form.getFieldValue('items') || [];
+            const item = items[name];
+            if (!item) return;
+            const qty = item.quantity;
+            if (qty && qty > 0 && val && Number(val) > 0) {
+              form.setFieldValue(['items', name, 'subtotal'], Math.round(qty * Number(val)));
+            }
+          }}
         />
       </Form.Item>
 
-      {/* Thành tiền (read-only) */}
-      <Form.Item shouldUpdate style={{ width: 120, marginBottom: 8 }}>
-        {() => {
-          const items = form.getFieldValue('items') || [];
-          const qty = items[name]?.quantity || 0;
-          const price = items[name]?.unitPrice || 0;
-          const subtotal = qty * price;
-          return (
-            <div
-              style={{
-                height: 32,
-                display: 'flex',
-                alignItems: 'center',
-                padding: '0 8px',
-                background: '#fff',
-                borderRadius: 6,
-                border: '1px solid #d9d9d9',
-                color: subtotal > 0 ? '#8B6914' : '#bfbfbf',
-                fontWeight: 500,
-                fontSize: 13,
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {subtotal > 0 ? formatCurrency(subtotal) : 'Thành tiền'}
-            </div>
-          );
-        }}
+      {/* Thành tiền */}
+      <Form.Item
+        {...rest}
+        name={[name, 'subtotal']}
+        style={{ width: 150, marginBottom: 8 }}
+      >
+        <InputNumber
+          placeholder="Thành tiền"
+          min={0}
+          step={1000}
+          style={{ width: '100%' }}
+          addonAfter="₫"
+          formatter={(val) => val ? `${val}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : ''}
+          parser={(val) => (val ? Number(val.replace(/,/g, '')) : 0) as any}
+          onChange={(val) => {
+            const items = form.getFieldValue('items') || [];
+            const item = items[name];
+            if (!item) return;
+            const qty = item.quantity;
+            if (qty && qty > 0 && val && Number(val) > 0) {
+              form.setFieldValue(['items', name, 'unitPrice'], Math.round(Number(val) / qty));
+            }
+          }}
+        />
       </Form.Item>
 
       {/* Xoá */}
@@ -1645,7 +1665,11 @@ export default function PurchaseOrdersPage() {
               const items = form.getFieldValue('items') || [];
               const total = items.reduce((sum: number, item: any) => {
                 if (!item) return sum;
-                return sum + (item.quantity || 0) * (item.unitPrice || 0);
+                // Ưu tiên dùng subtotal nếu có, nếu không thì tính từ quantity * unitPrice
+                const itemTotal = item.subtotal && item.subtotal > 0
+                  ? item.subtotal
+                  : (item.quantity || 0) * (item.unitPrice || 0);
+                return sum + itemTotal;
               }, 0);
               const itemCount = items.filter((i: any) => i?.ingredientId || i?.supplyId || i?.equipmentId).length;
 
