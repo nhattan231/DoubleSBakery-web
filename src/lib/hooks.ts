@@ -11,6 +11,7 @@ import {
   inventoryApi,
   suppliesApi,
   equipmentApi,
+  cvsApi,
 } from '@/lib/api';
 import type {
   DashboardData,
@@ -25,6 +26,7 @@ import type {
   EstimateHistoryItem,
   Supply,
   Equipment,
+  CVData,
 } from '@/types';
 
 // ========== Query Keys ==========
@@ -56,6 +58,8 @@ export const queryKeys = {
   equipment: (params?: any) => ['equipment', params] as const,
   estimateHistory: (params?: any) => ['estimateHistory', params] as const,
   estimateDetail: (id: string) => ['estimateHistory', id] as const,
+  cvs: ['cvs'] as const,
+  cvDetail: (id: string) => ['cvs', id] as const,
 };
 
 // ========== Dashboard ==========
@@ -566,5 +570,57 @@ export function useEstimateDetailQuery(id: string | undefined) {
       return res.data.data;
     },
     enabled: !!id,
+  });
+}
+
+// ========== CV Builder ==========
+export function useCvsQuery() {
+  return useQuery<CVData[]>({
+    queryKey: queryKeys.cvs,
+    queryFn: async () => {
+      const res = await cvsApi.getAll();
+      return res.data.data || res.data.list || [];
+    },
+  });
+}
+
+export function useCvDetailQuery(id: string | undefined) {
+  return useQuery<CVData>({
+    queryKey: queryKeys.cvDetail(id || ''),
+    queryFn: async () => {
+      const res = await cvsApi.getOne(id!);
+      return res.data.data;
+    },
+    enabled: !!id,
+  });
+}
+
+export function useCreateCvMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: any) => cvsApi.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.cvs });
+    },
+  });
+}
+
+export function useUpdateCvMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => cvsApi.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.cvs });
+    },
+  });
+}
+
+export function useDeleteCvMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => cvsApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.cvs });
+    },
   });
 }

@@ -193,6 +193,15 @@ export const categoriesApi = {
   getPublicMenu: () => api.get('/store-settings/public/menu'),
 };
 
+// ========== CVs API ==========
+export const cvsApi = {
+  getAll: () => api.get('/cvs'),
+  getOne: (id: string) => api.get(`/cvs/${id}`),
+  create: (data: any) => api.post('/cvs', data),
+  update: (id: string, data: any) => api.patch(`/cvs/${id}`, data),
+  delete: (id: string) => api.delete(`/cvs/${id}`),
+};
+
 // ========== Reports API ==========
 export const reportsApi = {
   dashboard: () => api.get('/reports/dashboard'),

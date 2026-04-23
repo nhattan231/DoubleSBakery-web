@@ -384,13 +384,13 @@ function MenuContent() {
   const uniqueProducts = Array.from(new Map(allProducts.map((p) => [p.id, p])).values());
   const featuredProducts = uniqueProducts.filter((p: any) => p.isFeatured);
 
-  // "Món mới" = danh mục đầu tiên có tên chứa "mới" hoặc "new" (case-insensitive)
-  const newCategory = categories.find((c) =>
-    c.name.toLowerCase().includes('mới') || c.name.toLowerCase().includes('new')
-  );
-  const newProducts = newCategory?.products || [];
-  // IDs của sản phẩm "mới" để đánh badge trên card
+  // Danh mục nổi bật = danh mục có isFeatured = true (chỉ có 1)
+  const featuredCategory = categories.find((c) => (c as any).isFeatured);
+  const newProducts = featuredCategory?.products || [];
+  // IDs của sản phẩm thuộc danh mục nổi bật (để hiển thị badge trên card)
   const newProductIds = new Set(newProducts.map((p) => p.id));
+  // Nội dung badge do admin tự nhập; nếu rỗng thì không hiển thị badge
+  const featuredBadgeText = ((featuredCategory as any)?.featuredBadgeText || '').trim();
 
   // Scroll to section
   const scrollToSection = (id: string) => {
@@ -555,12 +555,13 @@ function MenuContent() {
         </div>
       )}
 
-      {/* ============ MÓN MỚI CAROUSEL ============ */}
+      {/* ============ DANH MỤC NỔI BẬT CAROUSEL ============ */}
       {newProducts.length > 0 && (
         <NewProductsCarousel
           products={newProducts}
-          categoryName={newCategory?.name || 'Món mới'}
-          categoryDesc={newCategory?.description}
+          categoryName={featuredCategory?.name || ''}
+          categoryDesc={featuredCategory?.description}
+          badgeText={featuredBadgeText}
           color={pc}
           showPrices={settings.showPrices}
           onSelect={(p) => { setModalProduct(p); setModalImgIdx(0); setModalSize(null); }}
@@ -642,7 +643,7 @@ function MenuContent() {
                   }}
                 >
                   {cat.name}
-                  {(cat.name.toLowerCase().includes('mới') || cat.name.toLowerCase().includes('new')) && (
+                  {(cat as any).isFeatured && (
                     <span className="new-dot" style={{
                       display: 'inline-block', width: 7, height: 7, borderRadius: '50%',
                       background: '#ff4757', marginLeft: 5, verticalAlign: 'top',
@@ -690,7 +691,8 @@ function MenuContent() {
                         showDescription={settings.showDescription} color={pc}
                         onSelect={() => toggleProductExpand(product)}
                         staggerIndex={idx}
-                        isNew={newProductIds.has(product.id)}
+                        isNew={newProductIds.has(product.id) && !!featuredBadgeText}
+                        badgeText={featuredBadgeText}
                         isExpanded={expandedProductId === product.id}
                         anyExpanded={!!expandedProductId}
                         settings={settings}
@@ -732,12 +734,12 @@ function MenuContent() {
                             ) : (
                               <div style={{ width: '100%', height: '100%', background: `${pc}11`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>🍰</div>
                             )}
-                            {newProductIds.has(product.id) && (
+                            {newProductIds.has(product.id) && featuredBadgeText && (
                               <span style={{
                                 position: 'absolute', top: 6, left: 6,
                                 background: 'linear-gradient(135deg, #ff4757, #ff6b81)', color: '#fff',
                                 padding: '2px 6px', borderRadius: 6, fontSize: 9, fontWeight: 700,
-                              }}>MỚI</span>
+                              }}>{featuredBadgeText}</span>
                             )}
                             {settings.showPrices && (
                               <span style={{
@@ -1445,12 +1447,12 @@ function FeaturedCard({ product, color, showPrices, onSelect }: {
 // =============================================
 // GRID CARD (with visible size prices)
 // =============================================
-function GridCard({ product, showPrices, showDescription, color, onSelect, staggerIndex = 0, isNew = false,
+function GridCard({ product, showPrices, showDescription, color, onSelect, staggerIndex = 0, isNew = false, badgeText = '',
   isExpanded = false, anyExpanded = false, settings, getProductImages, expandImgIdx = 0, setExpandImgIdx, selectedSize, setSelectedSize,
   onAddNote, noteAddedAnim,
 }: {
   product: Product; showPrices: boolean; showDescription: boolean; color: string; onSelect: () => void;
-  staggerIndex?: number; isNew?: boolean; isExpanded?: boolean; anyExpanded?: boolean; settings?: any;
+  staggerIndex?: number; isNew?: boolean; badgeText?: string; isExpanded?: boolean; anyExpanded?: boolean; settings?: any;
   getProductImages?: (p: Product) => string[]; expandImgIdx?: number; setExpandImgIdx?: (v: number | ((p: number) => number)) => void;
   selectedSize?: string | null; setSelectedSize?: (v: string | null) => void;
   onAddNote?: (productName: string, productId: string, sizeName?: string, sizeId?: string) => void;
@@ -1507,15 +1509,15 @@ function GridCard({ product, showPrices, showDescription, color, onSelect, stagg
         ) : (
           <div style={{ height: '100%', background: `linear-gradient(135deg, ${color}11, ${color}22)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 56 }}>🍰</div>
         )}
-        {/* NEW badge */}
-        {isNew && (
+        {/* Featured category badge */}
+        {isNew && badgeText && (
           <div className="new-badge-pulse" style={{
             position: 'absolute', top: 10, left: 10,
             background: 'linear-gradient(135deg, #ff4757, #ff6b81)',
             color: '#fff', padding: '3px 10px', borderRadius: 12, fontSize: 11, fontWeight: 700,
             display: 'flex', alignItems: 'center', gap: 4, zIndex: 2,
           }}>
-            ✨ MỚI
+            ✨ {badgeText}
           </div>
         )}
         {/* Featured badge */}
@@ -1740,8 +1742,8 @@ function SocialBtn({ href, icon, color }: { href: string; icon: React.ReactNode;
 // =============================================
 // NEW PRODUCTS AUTO-SCROLL CAROUSEL (CSS animation, no duplicate)
 // =============================================
-function NewProductsCarousel({ products, categoryName, categoryDesc, color, showPrices, onSelect }: {
-  products: Product[]; categoryName: string; categoryDesc?: string; color: string;
+function NewProductsCarousel({ products, categoryName, categoryDesc, badgeText, color, showPrices, onSelect }: {
+  products: Product[]; categoryName: string; categoryDesc?: string; badgeText?: string; color: string;
   showPrices: boolean; onSelect: (p: Product) => void;
 }) {
   const [isPaused, setIsPaused] = useState(false);
@@ -1762,14 +1764,16 @@ function NewProductsCarousel({ products, categoryName, categoryDesc, color, show
       <div style={{ maxWidth: 960, margin: '0 auto', padding: '0 16px' }}>
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          <span className="new-badge-pulse" style={{
-            display: 'inline-flex', alignItems: 'center', gap: 5,
-            background: 'linear-gradient(135deg, #ff4757, #ff6b81)',
-            color: '#fff', padding: '5px 14px', borderRadius: 20,
-            fontSize: 13, fontWeight: 700, letterSpacing: 0.5,
-          }}>
-            ✨ MỚI
-          </span>
+          {badgeText && (
+            <span className="new-badge-pulse" style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              background: 'linear-gradient(135deg, #ff4757, #ff6b81)',
+              color: '#fff', padding: '5px 14px', borderRadius: 20,
+              fontSize: 13, fontWeight: 700, letterSpacing: 0.5,
+            }}>
+              ✨ {badgeText}
+            </span>
+          )}
           <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: '#1a1a1a' }}>{categoryName}</h2>
           {categoryDesc && <span style={{ fontSize: 13, color: '#999' }}>— {categoryDesc}</span>}
         </div>
@@ -1823,11 +1827,13 @@ function NewProductsCarousel({ products, categoryName, categoryDesc, color, show
                         <div style={{ width: '100%', height: '100%', background: `${color}11`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 48 }}>🍰</div>
                       )}
                       {/* Badge */}
-                      <span className="new-badge-pulse" style={{
-                        position: 'absolute', top: 10, left: 10,
-                        background: 'linear-gradient(135deg, #ff4757, #ff6b81)', color: '#fff',
-                        padding: '3px 10px', borderRadius: 10, fontSize: 11, fontWeight: 700,
-                      }}>✨ MỚI</span>
+                      {badgeText && (
+                        <span className="new-badge-pulse" style={{
+                          position: 'absolute', top: 10, left: 10,
+                          background: 'linear-gradient(135deg, #ff4757, #ff6b81)', color: '#fff',
+                          padding: '3px 10px', borderRadius: 10, fontSize: 11, fontWeight: 700,
+                        }}>✨ {badgeText}</span>
+                      )}
                       {/* Hover overlay */}
                       <div style={{
                         position: 'absolute', inset: 0,

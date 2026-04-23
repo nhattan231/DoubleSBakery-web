@@ -309,6 +309,8 @@ export interface Category {
   imageUrl?: string;
   sortOrder: number;
   isActive: boolean;
+  isFeatured: boolean;
+  featuredBadgeText?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -374,4 +376,48 @@ export interface ApiErrorResponse {
   message: string;
   status: number;
   errors?: any;
+}
+
+// ========== CV Builder Types ==========
+export interface CVPersonalInfo {
+  fullName: string;
+  email: string;
+  phone: string;
+  address: string;
+  avatarUrl?: string;
+  title: string;
+  summary: string;
+}
+
+export interface CVSectionItem {
+  id: string;
+  title: string;
+  subtitle: string;
+  startDate: string;
+  endDate: string;
+  description: string;
+  details?: string[];
+}
+
+export interface CVSection {
+  id: string;
+  type: string;
+  title: string;
+  visible: boolean;
+  items: CVSectionItem[];
+}
+
+export interface CVData {
+  id: string;
+  userId: string;
+  title: string;
+  templateId: string;
+  fontFamily: string;
+  fontSize: number;
+  primaryColor: string;
+  language: 'vi' | 'en';
+  personalInfo: CVPersonalInfo;
+  sections: CVSection[];
+  createdAt: string;
+  updatedAt: string;
 }

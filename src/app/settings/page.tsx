@@ -601,11 +601,23 @@ export default function SettingsPage() {
             <TextArea rows={2} placeholder="Mô tả ngắn cho danh mục" />
           </Form.Item>
           <Form.Item name="sortOrder" label="Thứ tự hiển thị"
-            extra="Số nhỏ hiển thị trước. Đặt tên danh mục chứa chữ «mới» hoặc «new» để tự động hiển thị nổi bật trên trang menu.">
+            extra="Số nhỏ hiển thị trước.">
             <InputNumber min={0} placeholder="0" style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item name="isActive" label="Hiển thị" valuePropName="checked">
             <Switch checkedChildren="Hiện" unCheckedChildren="Ẩn" defaultChecked />
+          </Form.Item>
+          <Form.Item name="isFeatured" label="Nổi bật" valuePropName="checked"
+            extra="Chỉ 1 danh mục được nổi bật. Bật ở đây sẽ tự động tắt danh mục khác.">
+            <Switch checkedChildren="Bật" unCheckedChildren="Tắt" />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(prev, cur) => prev.isFeatured !== cur.isFeatured}>
+            {({ getFieldValue }) => getFieldValue('isFeatured') ? (
+              <Form.Item name="featuredBadgeText" label="Nội dung badge"
+                extra="Để trống nếu không muốn hiển thị badge trên sản phẩm.">
+                <Input maxLength={50} placeholder="VD: NEW, HOT, MỚI..." />
+              </Form.Item>
+            ) : null}
           </Form.Item>
         </Form>
       </Modal>
