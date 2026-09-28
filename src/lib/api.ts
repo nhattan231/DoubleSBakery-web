@@ -107,6 +107,7 @@ export const ordersApi = {
   }) => api.get('/orders', { params }),
   getOne: (id: string) => api.get(`/orders/${id}`),
   create: (data: any) => api.post('/orders', data),
+  update: (id: string, data: any) => api.patch(`/orders/${id}`, data),
   updateStatus: (id: string, status: string) =>
     api.patch(`/orders/${id}/status`, { status }),
 };
@@ -128,6 +129,7 @@ export const purchaseOrdersApi = {
     api.get('/purchase-orders', { params }),
   getOne: (id: string) => api.get(`/purchase-orders/${id}`),
   create: (data: any) => api.post('/purchase-orders', data),
+  update: (id: string, data: any) => api.patch(`/purchase-orders/${id}`, data),
   updateStatus: (id: string, status: string) =>
     api.patch(`/purchase-orders/${id}/status`, { status }),
 };

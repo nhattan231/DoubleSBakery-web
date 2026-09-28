@@ -123,6 +123,19 @@ export function useCreateOrderMutation() {
   });
 }
 
+export function useUpdateOrderMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) =>
+      ordersApi.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard });
+      queryClient.invalidateQueries({ queryKey: queryKeys.recentOrders });
+    },
+  });
+}
+
 export function useUpdateOrderStatusMutation() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -356,6 +369,17 @@ export function useCreatePurchaseOrderMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: any) => purchaseOrdersApi.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
+    },
+  });
+}
+
+export function useUpdatePurchaseOrderMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) =>
+      purchaseOrdersApi.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
     },

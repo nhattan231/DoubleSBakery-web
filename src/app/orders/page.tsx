@@ -38,6 +38,7 @@ import {
   WarningOutlined,
   ExperimentOutlined,
   InboxOutlined,
+  EditOutlined,
 } from '@ant-design/icons';
 import { ordersApi, productionApi, suppliesApi } from '@/lib/api';
 import { formatCurrency, formatDateTime, orderStatusMap } from '@/lib/format';
@@ -79,6 +80,7 @@ export default function OrdersPage() {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [orderEstimate, setOrderEstimate] = useState<EstimateHistoryItem | null>(null);
@@ -153,47 +155,113 @@ export default function OrdersPage() {
     [allSupplies],
   );
 
-  const handleCreate = async (values: any) => {
-    setSubmitting(true);
-    try {
-      // Gộp sản phẩm thường + quà tặng vào cùng 1 mảng items
-      const normalItems = (values.items || []).map((item: any) => ({
+  const buildOrderPayload = (values: any) => {
+    const normalItems = (values.items || []).map((item: any) => ({
+      productId: item.productId,
+      sizeId: item.sizeId || undefined,
+      quantity: item.quantity,
+    }));
+    const giftItems = (values.giftItems || [])
+      .filter((item: any) => item?.productId)
+      .map((item: any) => ({
         productId: item.productId,
         sizeId: item.sizeId || undefined,
-        quantity: item.quantity,
+        quantity: item.quantity || 1,
+        isGift: true,
+        customPrice: Number(item.customPrice ?? 0),
       }));
-      const giftItems = (values.giftItems || [])
-        .filter((item: any) => item?.productId)
-        .map((item: any) => ({
-          productId: item.productId,
-          sizeId: item.sizeId || undefined,
-          quantity: item.quantity || 1,
-          isGift: true,
-          customPrice: Number(item.customPrice ?? 0),
-        }));
+    const supplyItemsPayload = (values.supplyItems || [])
+      .filter((item: any) => item?.supplyId)
+      .map((item: any) => ({
+        supplyId: item.supplyId,
+        quantity: item.quantity || 1,
+        unitPrice: Number(item.unitPrice ?? 0),
+      }));
+    return {
+      customerName: values.customerName,
+      phone: values.phone,
+      address: values.address,
+      notes: values.notes,
+      deductStock: values.deductStock !== false,
+      orderDate: values.orderDate ? values.orderDate.format('YYYY-MM-DD') : undefined,
+      items: [...normalItems, ...giftItems],
+      supplyItems: supplyItemsPayload,
+    };
+  };
 
-      const supplyItemsPayload = (values.supplyItems || [])
-        .filter((item: any) => item?.supplyId)
-        .map((item: any) => ({
-          supplyId: item.supplyId,
-          quantity: item.quantity || 1,
-          unitPrice: Number(item.unitPrice ?? 0),
-        }));
+  const closeOrderModal = () => {
+    setModalOpen(false);
+    setEditingOrderId(null);
+    form.resetFields();
+  };
 
-      const orderData = {
-        customerName: values.customerName,
-        phone: values.phone,
-        address: values.address,
-        notes: values.notes,
-        deductStock: values.deductStock !== false,
-        orderDate: values.orderDate ? values.orderDate.format('YYYY-MM-DD') : undefined,
-        items: [...normalItems, ...giftItems],
-        supplyItems: supplyItemsPayload,
-      };
-      await ordersApi.create(orderData);
-      message.success('Tạo đơn hàng thành công');
-      setModalOpen(false);
-      form.resetFields();
+  const openCreateModal = () => {
+    setEditingOrderId(null);
+    form.resetFields();
+    setTimeout(() => form.setFieldsValue({ items: [{}] }), 0);
+    setModalOpen(true);
+  };
+
+  const openEditModal = async (order: Order) => {
+    try {
+      const res = await ordersApi.getOne(order.id);
+      const full = res.data.data as Order;
+      if (full.status !== 'pending') {
+        message.warning('Chỉ sửa được đơn đang chờ xác nhận');
+        return;
+      }
+      const normalItems = full.items
+        .filter((i: any) => !i.isGift)
+        .map((i: any) => ({
+          productId: i.productId,
+          sizeId: i.sizeId || undefined,
+          quantity: i.quantity,
+        }));
+      const giftItems = full.items
+        .filter((i: any) => i.isGift)
+        .map((i: any) => ({
+          productId: i.productId,
+          sizeId: i.sizeId || undefined,
+          quantity: i.quantity,
+          customPrice: Number(i.customPrice ?? i.unitPrice ?? 0),
+        }));
+      const supplyItems = (full.supplyItems || []).map((si: any) => ({
+        supplyId: si.supplyId,
+        quantity: Number(si.quantity),
+        unitPrice: Number(si.unitPrice),
+      }));
+      setEditingOrderId(full.id);
+      setModalOpen(true);
+      setTimeout(() => {
+        form.setFieldsValue({
+          customerName: full.customerName,
+          phone: full.phone,
+          address: full.address,
+          notes: full.notes,
+          deductStock: full.deductStock !== false,
+          orderDate: full.orderDate ? dayjs(full.orderDate) : dayjs(full.createdAt),
+          items: normalItems.length > 0 ? normalItems : [{}],
+          giftItems,
+          supplyItems,
+        });
+      }, 0);
+    } catch {
+      message.error('Không tải được đơn hàng để sửa');
+    }
+  };
+
+  const handleSubmit = async (values: any) => {
+    setSubmitting(true);
+    try {
+      const orderData = buildOrderPayload(values);
+      if (editingOrderId) {
+        await ordersApi.update(editingOrderId, orderData);
+        message.success('Cập nhật đơn hàng thành công');
+      } else {
+        await ordersApi.create(orderData);
+        message.success('Tạo đơn hàng thành công');
+      }
+      closeOrderModal();
       queryClient.invalidateQueries({ queryKey: ['orders'] });
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Có lỗi xảy ra');
@@ -305,6 +373,11 @@ export default function OrdersPage() {
             Chi tiết
           </Button>
           {record.status === 'pending' && (
+            <Button size="small" icon={<EditOutlined />} onClick={() => openEditModal(record)}>
+              Sửa
+            </Button>
+          )}
+          {record.status === 'pending' && (
             <>
               <Popconfirm
                 title="Xác nhận đơn hàng? (Sẽ trừ nguyên liệu khỏi kho)"
@@ -356,11 +429,7 @@ export default function OrdersPage() {
         <Button
           type="primary"
           icon={<PlusOutlined />}
-          onClick={() => {
-            form.resetFields();
-            setTimeout(() => form.setFieldsValue({ items: [{}] }), 0);
-            setModalOpen(true);
-          }}
+          onClick={openCreateModal}
           style={{ backgroundColor: '#8B6914' }}
         >
           Tạo đơn hàng
@@ -466,6 +535,9 @@ export default function OrdersPage() {
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                         <Button size="small" icon={<EyeOutlined />} onClick={() => viewDetail(order)}>Chi tiết</Button>
                         {order.status === 'pending' && (
+                          <Button size="small" icon={<EditOutlined />} onClick={() => openEditModal(order)}>Sửa</Button>
+                        )}
+                        {order.status === 'pending' && (
                           <>
                             <Popconfirm title="Xác nhận đơn hàng?" onConfirm={() => handleStatusChange(order.id, 'confirmed')}>
                               <Button size="small" type="primary" icon={<CheckCircleOutlined />}>Xác nhận</Button>
@@ -518,13 +590,10 @@ export default function OrdersPage() {
 
       {/* Modal tạo đơn hàng */}
       <Modal
-        title="Tạo đơn hàng mới"
+        title={editingOrderId ? 'Sửa đơn hàng' : 'Tạo đơn hàng mới'}
         open={modalOpen}
-        onCancel={() => {
-          setModalOpen(false);
-          form.resetFields();
-        }}
-        okText="Tạo đơn hàng"
+        onCancel={closeOrderModal}
+        okText={editingOrderId ? 'Cập nhật đơn' : 'Tạo đơn hàng'}
         cancelText="Huỷ"
         okButtonProps={{ icon: <ShoppingCartOutlined />, loading: submitting }}
         cancelButtonProps={{ disabled: submitting }}
@@ -547,7 +616,7 @@ export default function OrdersPage() {
           }
         />
 
-        <Form form={form} layout="vertical" onFinish={handleCreate}>
+        <Form form={form} layout="vertical" onFinish={handleSubmit}>
           <Form.Item
             name="customerName"
             label="Tên khách hàng"

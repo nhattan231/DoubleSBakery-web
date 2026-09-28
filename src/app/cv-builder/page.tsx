@@ -12,6 +12,14 @@ import CVEditorPanel from '@/components/cv-builder/CVEditorPanel';
 import CVPreviewPanel, { CVPreviewHandle } from '@/components/cv-builder/CVPreviewPanel';
 import CVTemplateSelector from '@/components/cv-builder/CVTemplateSelector';
 
+function normalizeCv(cv: CVData): CVData {
+  return {
+    ...cv,
+    personalInfo: { ...DEFAULT_PERSONAL_INFO, ...(cv.personalInfo || {}) },
+    sections: (cv.sections || []).map((s) => ({ ...s, items: s.items || [] })),
+  };
+}
+
 function createEmptyCv(): CVData {
   return {
     id: '',
@@ -46,7 +54,7 @@ export default function CVBuilderPage() {
   // Load first CV on mount
   useEffect(() => {
     if (!initialized && !loadingList && cvList.length > 0) {
-      setCvData(cvList[0]);
+      setCvData(normalizeCv(cvList[0]));
       setInitialized(true);
     } else if (!initialized && !loadingList) {
       setInitialized(true);

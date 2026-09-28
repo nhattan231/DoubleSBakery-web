@@ -31,10 +31,12 @@ export default function CVSectionEditor({ section, onChange, onRemove, language 
     opacity: isDragging ? 0.5 : 1,
   };
 
+  const items = section.items ?? [];
+
   const updateItem = (index: number, field: keyof CVSectionItem, value: string) => {
-    const items = [...section.items];
-    items[index] = { ...items[index], [field]: value };
-    onChange({ ...section, items });
+    const next = [...items];
+    next[index] = { ...next[index], [field]: value };
+    onChange({ ...section, items: next });
   };
 
   const addItem = () => {
@@ -46,12 +48,11 @@ export default function CVSectionEditor({ section, onChange, onRemove, language 
       endDate: '',
       description: '',
     };
-    onChange({ ...section, items: [...section.items, newItem] });
+    onChange({ ...section, items: [...items, newItem] });
   };
 
   const removeItem = (index: number) => {
-    const items = section.items.filter((_, i) => i !== index);
-    onChange({ ...section, items });
+    onChange({ ...section, items: items.filter((_, i) => i !== index) });
   };
 
   const isTagType = ['skills', 'languages', 'interests'].includes(section.type);
@@ -113,7 +114,7 @@ export default function CVSectionEditor({ section, onChange, onRemove, language 
         {/* Section Content */}
         {!collapsed && (
           <div style={{ padding: '10px 12px' }}>
-            {section.items.map((item, index) => (
+            {items.map((item, index) => (
               <div key={item.id} style={{
                 padding: '8px 10px',
                 marginBottom: 6,

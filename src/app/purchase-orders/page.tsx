@@ -534,6 +534,7 @@ function ItemRow({
 export default function PurchaseOrdersPage() {
   const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingPoId, setEditingPoId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null);
   const [formDirty, setFormDirty] = useState(false);
@@ -760,36 +761,99 @@ export default function PurchaseOrdersPage() {
     return item?.unit || '';
   }, [selectedItemMap]);
 
-  const handleCreate = useCallback(async (values: any) => {
+  const buildPoPayload = useCallback((values: any) => ({
+    supplierId: values.supplierId,
+    notes: values.notes,
+    items: (values.items || []).map((item: any) => ({
+      itemType: item.itemType || 'ingredient',
+      ingredientId: item.ingredientId,
+      supplyId: item.supplyId,
+      equipmentId: item.equipmentId,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+    })),
+  }), []);
+
+  const closePoModal = useCallback(() => {
+    setModalOpen(false);
+    setEditingPoId(null);
+    setFormDirty(false);
+    setMinimized(false);
+    form.resetFields();
+    setSelectedItemMap({});
+    sessionStorage.removeItem(DRAFT_STORAGE_KEY);
+  }, [form]);
+
+  const openEditPoModal = useCallback(async (po: PurchaseOrder) => {
+    if (po.status !== 'draft' && po.status !== 'confirmed') {
+      message.warning('Chỉ sửa được phiếu ở trạng thái Nháp hoặc Đã xác nhận');
+      return;
+    }
+    try {
+      const res = await purchaseOrdersApi.getOne(po.id);
+      const full = res.data.data as PurchaseOrder;
+      const items = full.items.map((item: any) => ({
+        itemType: item.itemType || 'ingredient',
+        ingredientId: item.ingredientId || undefined,
+        supplyId: item.supplyId || undefined,
+        equipmentId: item.equipmentId || undefined,
+        quantity: Number(item.quantity),
+        unitPrice: Number(item.unitPrice),
+        subtotal: Number(item.subtotal),
+      }));
+      const newMap: Record<number, { type: string; id: string; unit: string }> = {};
+      items.forEach((item: any, idx: number) => {
+        const itemType = item.itemType || 'ingredient';
+        let unit = 'cái';
+        let id = '';
+        if (itemType === 'ingredient' && item.ingredientId) {
+          id = item.ingredientId;
+          unit = ingredients.find((i) => i.id === id)?.unit || '';
+        } else if (itemType === 'supply' && item.supplyId) {
+          id = item.supplyId;
+          unit = allSupplies.find((s) => s.id === id)?.unit || '';
+        } else if (itemType === 'equipment' && item.equipmentId) {
+          id = item.equipmentId;
+        }
+        if (id) newMap[idx] = { type: itemType, id, unit };
+      });
+      setSelectedItemMap(newMap);
+      setEditingPoId(full.id);
+      setMinimized(false);
+      sessionStorage.removeItem(DRAFT_STORAGE_KEY);
+      setModalOpen(true);
+      setTimeout(() => {
+        form.setFieldsValue({
+          supplierId: full.supplierId,
+          notes: full.notes,
+          items: items.length > 0 ? items : [{}],
+        });
+        setFormDirty(true);
+      }, 50);
+    } catch {
+      message.error('Không tải được phiếu nhập để sửa');
+    }
+  }, [form, ingredients, allSupplies]);
+
+  const handleSubmit = useCallback(async (values: any) => {
     setSubmitting(true);
     try {
-      const poData = {
-        supplierId: values.supplierId,
-        notes: values.notes,
-        items: values.items.map((item: any) => ({
-          itemType: item.itemType || 'ingredient',
-          ingredientId: item.ingredientId,
-          supplyId: item.supplyId,
-          equipmentId: item.equipmentId,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-        })),
-      };
-      await purchaseOrdersApi.create(poData);
-      message.success('Tạo phiếu nhập thành công');
-      setModalOpen(false);
-      setFormDirty(false);
-      setMinimized(false);
-      form.resetFields();
-      setSelectedItemMap({});
-      sessionStorage.removeItem(DRAFT_STORAGE_KEY);
+      const poData = buildPoPayload(values);
+      if (editingPoId) {
+        await purchaseOrdersApi.update(editingPoId, poData);
+        message.success('Cập nhật phiếu nhập thành công');
+      } else {
+        await purchaseOrdersApi.create(poData);
+        message.success('Tạo phiếu nhập thành công');
+      }
+      closePoModal();
       queryClient.invalidateQueries({ queryKey: ['purchaseOrders'] });
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Có lỗi xảy ra');
     } finally {
       setSubmitting(false);
     }
-  }, [form, queryClient]);
+  }, [buildPoPayload, editingPoId, closePoModal, queryClient]);
 
   // draft → confirmed: chỉ xác nhận đơn, CHƯA nhập kho
   const handleConfirm = useCallback(async (id: string) => {
@@ -1172,6 +1236,12 @@ export default function PurchaseOrdersPage() {
             Chi tiết
           </Button>
 
+          {(record.status === 'draft' || record.status === 'confirmed') && (
+            <Button size="small" icon={<EditOutlined />} onClick={() => openEditPoModal(record)}>
+              Sửa
+            </Button>
+          )}
+
           {/* draft → confirmed (xác nhận đơn, CHƯA nhập kho) */}
           {record.status === 'draft' && (
             <Popconfirm
@@ -1220,7 +1290,7 @@ export default function PurchaseOrdersPage() {
         </Space>
       ),
     },
-  ], [viewDetail, handleConfirm, handleReceived, handleCancel]);
+  ], [viewDetail, openEditPoModal, handleConfirm, handleReceived, handleCancel]);
 
   return (
     <div>
@@ -1241,6 +1311,7 @@ export default function PurchaseOrdersPage() {
             type="primary"
             icon={<PlusOutlined />}
             onClick={() => {
+              setEditingPoId(null);
               form.resetFields();
               setFormDirty(false);
               setSelectedItemMap({});
@@ -1362,6 +1433,9 @@ export default function PurchaseOrdersPage() {
                   </div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', borderTop: '1px solid #f5f5f5', paddingTop: 6 }}>
                     <Button size="small" icon={<EyeOutlined />} onClick={() => viewDetail(po)}>Chi tiết</Button>
+                    {(po.status === 'draft' || po.status === 'confirmed') && (
+                      <Button size="small" icon={<EditOutlined />} onClick={() => openEditPoModal(po)}>Sửa</Button>
+                    )}
 
                     {/* draft -> confirmed */}
                     {po.status === 'draft' && (
@@ -1497,9 +1571,13 @@ export default function PurchaseOrdersPage() {
         title={
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingRight: 24 }}>
             <div>
-              <div style={{ fontSize: 16, fontWeight: 600 }}>Tạo phiếu nhập mới</div>
+              <div style={{ fontSize: 16, fontWeight: 600 }}>
+                {editingPoId ? 'Sửa phiếu nhập' : 'Tạo phiếu nhập mới'}
+              </div>
               <div style={{ fontSize: 12, color: '#999', fontWeight: 400 }}>
-                Tạo phiếu nhập nguyên liệu từ nhà cung cấp vào kho
+                {editingPoId
+                  ? 'Cập nhật toàn bộ nội dung phiếu (chưa nhập kho)'
+                  : 'Tạo phiếu nhập nguyên liệu từ nhà cung cấp vào kho'}
               </div>
             </div>
             {formDirty && (
@@ -1518,7 +1596,7 @@ export default function PurchaseOrdersPage() {
         open={modalOpen}
         onCancel={handleCloseModal}
         onOk={() => form.submit()}
-        okText="Tạo phiếu"
+        okText={editingPoId ? 'Cập nhật phiếu' : 'Tạo phiếu'}
         cancelText="Huỷ"
         width={960}
         okButtonProps={{ loading: submitting }}
@@ -1528,7 +1606,7 @@ export default function PurchaseOrdersPage() {
         <Form
           form={form}
           layout="vertical"
-          onFinish={handleCreate}
+          onFinish={handleSubmit}
           onValuesChange={() => setFormDirty(true)}
         >
           {/* — Nhà cung cấp — */}
